@@ -12,7 +12,7 @@ jobs:
     steps:
 
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     # Handle dependencies here instead of conda_env.yaml
     # because some packages are conda-forge only,
@@ -35,7 +35,7 @@ jobs:
         touch docs2/_build/html/.nojekyll
 
     - name: Deploy
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/main' && github.repository == 'IMRCLab/crazyswarm2'
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         folder: docs2/_build/html # The folder the action should deploy.

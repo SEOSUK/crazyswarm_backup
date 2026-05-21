@@ -1,0 +1,43 @@
+csv_playback:
+  ros__parameters:
+    launch_rviz: true
+    start_offset_sec: 0.0
+    playback_rate: 1.0
+    publish_topic: "/data_logging_msg"
+
+log_decoder:
+  ros__parameters:
+    use_sim_time: false
+    layout: "auto"   # auto, basic32, specific50
+    end_effector_offset: [0.1, 0.0, 0.04]
+    position_lpf_enable: true
+    position_lpf_cutoff_hz: 2.0
+
+rviz_visual:
+  ros__parameters:
+    use_sim_time: false
+    offline_force_source: "first_order"  # first_order | second_order | consistency
+    offline_normal_quat_topic_pure: "/log_player/offline/contact_frame_quat_pure"
+    offline_normal_quat_topic_k1: "/log_player/offline/contact_frame_quat"
+    offline_normal_quat_topic_k2: "/log_player/offline/contact_frame_quat_k2"
+    offline_normal_metrics_topic_pure: "/log_player/offline/normal_debug_metrics_pure"
+    offline_normal_metrics_topic_k1: "/log_player/offline/normal_debug_metrics"
+    offline_normal_metrics_topic_k2: "/log_player/offline/normal_debug_metrics_k2"
+    arrow_scale: 1.0
+    normal_scale: 0.10
+    publish_hz: 30.0
+    wall_x_offset: 0.0
+    wall_y_width: 1.0
+    wall_z_height: 1.5
+    wall_x_thickness: 0.01
+    ee_history_enabled: true
+    ee_history_duration_sec: 20.0
+    ee_history_width: 0.01
+
+panel:
+  ros__parameters:
+    enabled_panels: ["normal_vector_force", "mob_consistency"]
+    delay_sec: 1.5
+    history_sec: 6.0
+    update_hz: 30.0
+    render_hz: 5.0

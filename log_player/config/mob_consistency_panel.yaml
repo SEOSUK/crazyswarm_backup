@@ -1,0 +1,21 @@
+mob_consistency:
+  ros__parameters:
+    history_sec: 8.0
+    update_hz: 60.0
+    pose_topic: "/log_player/out/pose"
+    raw_topic: "/data_logging_msg"
+    raw_layout: "auto"
+    force_gt_topic: "/log_player/online/force_estimate"
+    mob_1st_topic: "/log_player/offline/drone_external_force_mob"
+    mob_2nd_topic: "/log_player/offline/drone_external_force_mob_2nd"
+    mob_consistency_topic: "/log_player/offline/drone_external_force_mob_2nd_tau"
+    mob_consistency_terms_topic: "/log_player/offline/drone_external_force_mob_2nd_tau_terms"
+    mob_consistency_match_topic: "/log_player/offline/drone_external_force_mob_2nd_tau_consistency"
+    end_effector_offset: [0.1, 0.0, 0.04]
+    contact_force_threshold: 0.005
+    epsilon_tau_abs: 0.001
+    mass: 0.04338
+    g: 9.81
+    motor.force_source: "scaled"
+    motor.arm_length: 0.046
+    motor.thrust_to_torque: 0.006

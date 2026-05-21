@@ -1,0 +1,19 @@
+normal_vector_force:
+  ros__parameters:
+    history_sec: 6.0
+    update_hz: 30.0
+    render_hz: 5.0
+    contact_quat_topic: "/log_player/offline/contact_frame_quat"
+    pose_topic: "/log_player/out/pose"
+    ee_pose_topic: "/log_player/out/ee_pose"
+    vel_cmd_topic: "/log_player/out/cmd_vel"
+    vel_actual_topic: "/log_player/out/ee_velocity"
+    force_cmd_topic: ""
+    force_actual_topic: "/log_player/offline/contact_force_x"
+    force_world_topic: "/log_player/online/force_estimate"
+    consistency_topic: "/log_player/offline/drone_external_force_mob_2nd_tau_consistency"
+    pure_mob_topic: "/log_player/offline/ee_applied_mob_2nd"
+    packed_debug_topic: "/log_player/offline/normal_debug_metrics"
+    environment.type: "wall"
+    wall.pos.x: 0.0
+    end_effector_offset: [0.1, 0.0, 0.04]

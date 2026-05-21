@@ -1,0 +1,27 @@
+runtime:
+  ros__parameters:
+    mode: "debug"   # "default" keeps the current nodes, "debug" enables firmware SI logging debug nodes
+
+data_logging:
+  ros__parameters:
+    csv_dir: "~/hitl_ws/src/flying_pen/bag/logging"
+    flush_every_n: 200
+    publish_topic: "/data_logging_msg"
+    cf_ns: "/cf2"
+    loop_hz: 100.0
+    stale_warn_sec: 0.5
+    stale_fail_sec: 2.0
+
+data_logging_debug:
+  ros__parameters:
+    csv_dir: "~/hitl_ws/src/flying_pen/bag/logging"
+    publish_topic: "/data_logging_msg_debug"
+    cf_ns: "/cf2"
+    loop_hz: 50.0
+
+data_logging_firmware_debug:
+  ros__parameters:
+    history_sec: 8.0
+    update_hz: 30.0
+    render_hz: 15.0
+    topic: "/data_logging_msg_debug"

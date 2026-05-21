@@ -1,0 +1,5 @@
+rviz_visual:
+  ros__parameters:
+    end_effector_offset: [0.1, 0.0, 0.04]
+    history_sample_period: 0.2
+    history_duration: 30.0

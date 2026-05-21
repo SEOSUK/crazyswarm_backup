@@ -1,0 +1,36 @@
+command_publisher:
+  ros__parameters:
+    dx: 0.1
+    dy: 0.1
+    dz: 0.2
+    dvx: 0.1
+    dvy: 0.1
+    dvz: 0.1
+    dyaw_deg: 2.0
+    command_frame: "end_effector"
+    end_effector_offset: [0.1, 0.0, 0.04]
+    trajectory_type: "rectangle"  # circle | rectangle | accelerating_circle_xy
+    trajectory_ramp_time_sec: 3.0
+    trajectory_velocity_profile_mps: 0.10
+    trajectory_circle_radius_y: 0.40
+    trajectory_circle_radius_z: 0.40
+    trajectory_rectangle_size_y: 0.3
+    trajectory_rectangle_size_z: 0.3
+    trajectory_rectangle_corner_pause_sec: 3.0
+    trajectory_period_sec: 25.0  # used by circle trajectory
+    trajectory_accel_ellipse_radius_x: 1.0
+    trajectory_accel_ellipse_radius_y: 0.0
+    trajectory_accel_circle_initial_period_sec: 6.28
+    trajectory_accel_circle_period_decrement_sec: 0.0
+    trajectory_accel_circle_min_period_sec: 3.0
+
+command_velocity_publisher:
+  ros__parameters:
+    cf_namespace: "cf2"
+    interface_type: "hover" # default: "hover", override with --ros-args -p interface_type:=velocity_world
+    dvx: 0.01
+    dvy: 0.01
+    dvz: 0.2
+    dz: 0.01
+    dyaw_rate: 0.2
+    hover_z_distance: 0.6

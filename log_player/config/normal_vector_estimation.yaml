@@ -1,0 +1,38 @@
+normal_vector_estimation:
+  ros__parameters:
+    use_sim_time: false
+    reference_object: "end_effector"
+    normal_estimator_method: "normal_force_based"
+    publish_hz: 100.0
+
+    flip_measured_force: false
+    force_positive_x_hemisphere: true
+    normal_force_threshold: 0.005
+    normal_lpf_alpha: 0.2
+
+    force_observation_source: "mob_2nd_tau"
+
+    Lf_Lv_fusion:
+      velocity_epsilon: 0.005
+      beta_v: 0.3
+      sigma_v: 0.3
+      slip_blend_velocity: 0.04
+      force_epsilon: 0.01
+      beta_f: 1.0
+      sigma_f: 1.0
+      c_v: 0.0005
+      eps_lambda: 1.0e-4
+      c_f: 0.05
+      eta_tau: 0.05
+      sigma_tau: 2.0e-3
+      use_raw_mob_tau_residual: true
+      eps_alpha: 1.0e-6
+      eps_l: 1.0e-6
+      min_confidence: 0.08
+
+    normal_force_based:
+      epsilon_g: 1.0e-4
+      epsilon_f: 1.0e-4
+      candidate_lpf_alpha: 0.5
+      beta_n: 0.3
+      sigma_n: 0.3

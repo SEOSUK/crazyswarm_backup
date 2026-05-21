@@ -1,0 +1,205 @@
+# named list of all robots
+robots:
+  cf2:
+    enabled: true
+    uri: radio://0/100/1M/E7E7E7E7B6 # first
+    # uri: radio://0/80/2M/E7E7E7E7B5 # second
+#    uri: udp://0.0.0.0:19850 # simul
+    initial_position: [0.0, 0.0, 0.0]
+    type: cf21  # see robot_types
+
+# Definition of the various robot types
+robot_types:
+  cf21:
+    big_quad: false
+    motion_capture:
+      enabled: true  # 원래는 true
+      # only if enabled; see motion_capture.yaml
+      marker: default_single_marker
+      dynamics: default
+    battery:
+      voltage_warning: 3.8  # V
+      voltage_critical: 3.7 # V
+    firmware_logging:
+      enabled: true
+      default_topics:
+        pose:
+          frequency: 20
+        status:
+          frequency: 1
+      custom_topics:
+        # Input wrench reconstructed from motor commands in body frame.
+#        cf_su_body_force:
+#          frequency: 20
+#          vars: [suWrenchObs.bodyFx, suWrenchObs.bodyFy, suWrenchObs.bodyFz]
+        # Same input force rotated into world frame.
+#        cf_su_world_force:
+#          frequency: 20
+#          vars: [suWrenchObs.worldFx, suWrenchObs.worldFy, suWrenchObs.worldFz]
+        # Input torque reconstructed from motor commands in body frame.
+#        cf_su_body_torque:
+#          frequency: 20
+# #          vars: [suWrenchObs.bodyTx, suWrenchObs.bodyTy, suWrenchObs.bodyTz]
+        # Per-motor thrust estimate used for unit checks.
+        cf_su_motor_thrust:
+          frequency: 20
+          vars: [suWrenchObs.f1, suWrenchObs.f2, suWrenchObs.f3, suWrenchObs.f4]
+        # Final motor PWM command after compensation/cap.
+#        cf_su_motor_pwm:
+#          frequency: 20
+#          vars: [suWrenchObs.pwm1, suWrenchObs.pwm2, suWrenchObs.pwm3, suWrenchObs.pwm4]
+        # Velocity from firmware stateEstimate.
+        cf_su_state_vel:
+          frequency: 20
+          vars: [suWrenchObs.stateVx, suWrenchObs.stateVy, suWrenchObs.stateVz]
+        # Velocity from position differentiation helper.
+        cf_su_pos_vel:
+          frequency: 20
+          vars: [suWrenchObs.posVx, suWrenchObs.posVy, suWrenchObs.posVz]
+#         # Raw body-frame acceleration used as Mahony/complementary input before gravity trim LPF output stage.
+        cf_imu_acc_raw:
+          frequency: 20
+          vars: [acc.x, acc.y, acc.z]
+        # Raw body-frame angular rate used as Mahony/complementary gyro input.
+        cf_imu_gyro_raw:
+          frequency: 20
+          vars: [gyro.x, gyro.y, gyro.z]
+#         # World-frame acceleration from firmware state.acc.
+        cf_su_acc:
+          frequency: 20
+          vars: [suWrenchObs.accWx, suWrenchObs.accWy, suWrenchObs.accWz]
+#         # Desired translational velocity from the position controller.
+        vel_des:
+          frequency: 10
+          vars: [posCtl.targetVX, posCtl.targetVY, posCtl.targetVZ]
+#         # Desired roll/pitch/yaw command from controller.
+        att_des:
+          frequency: 10
+          vars: [controller.roll, controller.pitch, controller.yaw]
+#         # Battery voltage only.
+        cf_su_voltage:
+          frequency: 10
+          vars: [pm.vbat]
+
+
+    firmware_params:
+      commander:
+        enHighLevel: 1
+      stabilizer:  # 제어기랑 상태관측기 고를 수 있음
+        estimator: 2  # 1: complementary, 2: kalman
+        controller: 1  # 1: PID, 2: mellinger, 3: INDI, 4: Brescianini, 5: Lee
+      locSrv:
+        extPosStdDev: 1e-3
+        extQuatStdDev: 0.5e-1
+      imu_sensors:
+        accTrimRoll: -0.5
+        accTrimPitch: -0.4
+        accBiasX: 0.0
+        accBiasY: 0.0
+        accBiasZ: 0.0
+      # ================================================
+      #     Custom modules
+      # ================================================
+      # su_wrench:
+      #   cmd_fx: 0.0  # force command
+      #   mass: 0.045  # observer mass term [kg]
+      #   Kf: 30.0  # force observer gain
+      #   Ktau: 30.0  # torque observer gain
+      #   Kp: 10.9544511501  # translational momentum correction gain
+      #   Kh: 10.9544511501  # rotational momentum correction gain
+      #   Keps: 500.0  # consistency residual correction gain
+      #   deadzone_F: 0.0
+      #   deadzone_T: 0.0
+      #   rOffX: 0.1
+      #   rOffY: 0.0
+      #   rOffZ: 0.04
+      #   tauOffRoll: 0.0
+      #   tauOffPitch: 0.0 #0.0011  # useful when COM is shifted in body x
+      #   tauOffYaw: 0.0
+      #   consistencyMode: 2  # 0=None, 1=Residual, 2=Both
+
+      kalman:
+        resetEstimation: 0
+        # --------------------------------
+        # (A) Complementary -> Kalman fusion (roll/pitch error D0/D1 update)
+        # --------------------------------
+        # 0: off, 1: fuse qComp-based roll/pitch error into D0/D1 in finalize()
+        # 그니까 1이면, 칼만 내부상태도 complementary를 봄
+        # fuseCompAttToKalman: 0
+        # 위에 값 1일때만 의미있음. 이걸 줄이면 complementary가 우세, 아니면 kalamn이 우세.
+        # compFuseStdRP 작게 → R(측정분산) 작음 → K gain 커짐 → Kalman roll/pitch가 qComp를 더 세게 따라감
+        # compFuseStdRP 크게 → comp를 “노이즈 큰 센서”로 취급 → Kalman은 덜 따라감
+        # compFuseStdRP: 0.05
+
+        # --------------------------------
+        # SEUK: complementary attitude output / slave
+        # --------------------------------
+        # 0: Kalman attitude 사용 (기존과 동일)
+        # 1: complementary attitude로 stateEstimate.* (roll/pitch/yaw, q, vel, acc) 출력
+        # 2: complementary attitude로 stateEstimate.* 근데이제 yaw는 kalman
+        useCompAttOut: 2
+
+        # 0: Kalman 내부 q/R는 원래대로 두고, 출력만 complementary 사용
+        # 1: Kalman 내부 q/R도 complementary에 동기화 (내부 dynamics도 comp 기반)
+        slaveAttToComp: 0
+
+        # complementary Mahony filter roll/pitch correction gain
+        compKp: 1.2
+        compKi: 0.02
+#        compPitchBias: 0.015
+
+        # --------------------------------구
+        # Slave mode covariance recovery tuning
+        # --------------------------------
+        # std dev [rad] used when slaveAttToComp=1 and you reset P(D0/D1)
+#        compSlaveStdRP: 0.10
+
+
+
+
+##### controller: 1 PID #####
+      posCtlPid:
+        xKp: 1.3 # Default: 2.0
+        yKp: 1.7 # Default: 2.0
+        zKp: 2.0 # Default: 2.0
+        xKi: 0.0 # Default: 0.0
+        yKi: 0.0 # Default: 0.0
+        zKi: 0.0 # Default: 0.5
+        xKd: 0.15 # Default: 0.0
+        yKd: 0.15 # Default: 0.0
+        zKd: 0.15 # Default: 0.0
+      velCtlPid:
+        vxKp: 14.0 # Default: 25.0
+        vyKp: 20.0 # Default: 25.0
+        vzKp: 14.0 # Default: 25.0
+        vxKi: 0. # Default: 1.0
+        vyKi: 0. # Default: 1.0
+        vzKi: 7.0 # Default: 15.0
+        vxKd: 1.2 # Default: 0.0
+        vyKd: 1.2 # Default: 0.0
+        vzKd: 1.2 # Default: 0.0
+
+      pid_attitude:
+        roll_kp: 6.5 # Default: 6.0
+        pitch_kp: 8.0 # Default: 6.0
+        yaw_kp: 7.5 # Default: 6.0
+        roll_ki: 2.0 # Default: 3.0
+        pitch_ki: 2.0 # Default: 3.0
+        yaw_ki: 0.7 # Default: 1.0
+        roll_kd: 0.3 # Default: 0.0
+        pitch_kd: 1.1 # Default: 0.0
+        yaw_kd: 0.7 # Default: 0.35
+      pid_rate:
+        roll_kp: 220.0 # Default: 200.0
+        pitch_kp: 250.0 # Default: 200.0
+        yaw_kp: 280.0 # Default: 120.0
+        roll_ki: 300.0 # Default: 400.0
+        pitch_ki: 300.0 # Default: 400.0
+        yaw_ki: 20.0 # Default: 16.7
+        roll_kd: 2.5 # Default: 2.5
+        pitch_kd: 3.5 # Default: 2.5
+        yaw_kd: 10.5 # Default: 0.0
+
+    broadcasts:
+      num_repeats: 1 # number of times broadcast commands are repeated
+      delay_between_repeats_ms: 1 # delay in milliseconds between individual repeats

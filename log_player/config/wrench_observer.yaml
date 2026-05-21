@@ -1,0 +1,34 @@
+wrench_observer:
+  ros__parameters:
+    use_sim_time: false
+    raw_topic: "/data_logging_msg"
+    raw_layout: "auto"
+    end_effector_offset: [0.1, 0.0, 0.04]
+    g: 9.81
+    mass: 0.047
+    motor.force_source: "scaled"  # "raw" | "scaled"
+    motor.arm_length: 0.046
+    motor.thrust_to_torque: 0.006
+    mob.Jxx: 2.3951e-5
+    mob.Jyy: 2.3951e-5
+    mob.Jzz: 3.2347e-5
+
+    observer_hz: 250.0
+    mob.dt_fixed_enable: true
+    mob.dt_fixed_value: 0.004
+    mob.dt_alpha: 0.2
+    mob.vel_lpf_enable: false
+    mob.vel_lpf_cutoff_hz: 1.0
+
+    mob.Kf_1st_order: 0.5
+    mob.Ktau_1st_order: 0.5
+    mob.mob_alpha_1st_order: 1.0
+
+    mob.Kf_2nd_order: 30.0
+    mob.Ktau_2nd_order: 10.0
+    mob.mob_alpha_2nd_order: 1.0
+    mob.Kp: 10.9544511501
+    mob.KpTau: 6.32455532034
+    mob.Ke: 200.0
+    mob.Ke_alt: 50.0
+    mob.epsilon_tau: 1.0e-6

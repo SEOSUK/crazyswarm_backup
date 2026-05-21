@@ -1,0 +1,140 @@
+# named list of all robots
+robots:
+  cf2:
+    enabled: true
+    uri: radio://0/100/1M/E7E7E7E7B6 # first
+#    uri: radio://0/80/2M/E7E7E7E7B5 # second
+#    uri: udp://0.0.0.0:19850 # simul
+    initial_position: [0.0, 0.0, 0.0]
+    type: cf21  # see robot_types
+
+# Definition of the various robot types
+robot_types:
+  cf21:
+    big_quad: false
+    motion_capture:
+      enabled: true  # 원래는 true
+      # only if enabled; see motion_capture.yaml
+      marker: default_single_marker
+      dynamics: default
+    battery:
+      voltage_warning: 3.8  # V
+      voltage_critical: 3.7 # V
+    firmware_logging:
+      enabled: true
+      default_topics:
+        pose:
+          frequency: 20
+        status:
+          frequency: 1
+      custom_topics:
+        # For PID Gain Tuning
+        stateEstimate_velocity:  # global
+          frequency: 10
+          vars: [stateEstimate.vx, stateEstimate.vy, stateEstimate.vz]
+        stateEstimate_acc:  # global
+          frequency: 10
+          vars: [stateEstimate.ax, stateEstimate.ay, stateEstimate.az]
+#        state_body_vel:  # yaw-aligned body
+#          frequency: 10
+#          vars: [posCtl.bodyVX, posCtl.bodyVY]   # 또는 내부 state_body_vx/y 로그
+        gyro_feedback:
+          frequency: 10
+          vars: [gyro.x, gyro.y, gyro.z]
+        vel_des:  # yaw-aligned body
+          frequency: 11
+          vars: [posCtl.targetVX, posCtl.targetVY, posCtl.targetVZ]
+        att_des:
+          frequency: 10
+          vars: [controller.roll, controller.pitch, controller.yaw]
+        rate_des:
+          frequency: 10
+          vars: [controller.rollRate, controller.pitchRate, controller.yawRate]
+        # ---------------------------
+        # Kalman attitude / attitude-error debug (SEUK)
+        # ---------------------------
+#        kalman_att_qComp:
+#          frequency: 10
+#          vars: [kalman.q0, kalman.q1, kalman.q2, kalman.q3]
+#        kalman_att_err:
+#          frequency: 10
+#          vars: [kalman.stateD0, kalman.stateD1, kalman.stateD2]
+
+    firmware_params:
+      commander:
+        enHighLevel: 1
+      stabilizer:  # 제어기랑 상태관측기 고를 수 있음
+        estimator: 2  # 1: complementary, 2: kalman
+        controller: 1  # 1: PID, 2: mellinger, 3: INDI, 4: Brescianini, 5: Lee
+      locSrv:
+        extPosStdDev: 1e-3
+        extQuatStdDev: 0.5e-1
+      # ================================================
+      #     Custom modules
+      # ================================================
+      su_wrench:
+        cmd_fx: 0.0  # force command
+        Kf: 1.0  # force observer gain
+        Ktau: 1.0  # torque observer gain
+        Kp: 1.0  # translational momentum correction gain
+        Kh: 1.0  # rotational momentum correction gain
+        Keps: 1.0  # consistency residual correction gain
+        deadzone_F: 0.0
+        deadzone_T: 0.0
+        rOffX: 0.1
+        rOffY: 0.0
+        rOffZ: 0.04
+        consistencyMode: 2  # 0=None, 1=Residual, 2=Both
+
+      kalman:
+        resetEstimation: 0
+        useCompAttOut: 2
+        slaveAttToComp: 0
+        compKp: 1.5
+        compKi: 0.02
+
+      posCtlPid:
+        xKp: 1.3 # Default: 2.0
+        yKp: 1.5 # Default: 2.0
+        zKp: 2.0 # Default: 2.0
+        xKi: 0.0 # Default: 0.0
+        yKi: 0.0 # Default: 0.0
+        zKi: 0.0 # Default: 0.5
+        xKd: 0.15 # Default: 0.0
+        yKd: 0.15 # Default: 0.0
+        zKd: 0.15 # Default: 0.0
+      velCtlPid:
+        vxKp: 14.0 # Default: 25.0
+        vyKp: 17.0 # Default: 25.0
+        vzKp: 14.0 # Default: 25.0
+        vxKi: 1. # Default: 1.0
+        vyKi: 1.0 # Default: 1.0
+        vzKi: 10.0 # Default: 15.0
+        vxKd: 1.2 # Default: 0.0
+        vyKd: 1.2 # Default: 0.0
+        vzKd: 1.2 # Default: 0.0
+
+      pid_attitude:
+        roll_kp: 6.5 # Default: 6.0
+        pitch_kp: 7.6 # Default: 6.0
+        yaw_kp: 7.5 # Default: 6.0
+        roll_ki: 2.0 # Default: 3.0
+        pitch_ki: 2.0 # Default: 3.0
+        yaw_ki: 0.7 # Default: 1.0
+        roll_kd: 0.3 # Default: 0.0
+        pitch_kd: 0.5 # Default: 0.0
+        yaw_kd: 0.7 # Default: 0.35
+      pid_rate:
+        roll_kp: 220.0 # Default: 200.0
+        pitch_kp: 230.0 # Default: 200.0
+        yaw_kp: 250.0 # Default: 120.0
+        roll_ki: 300.0 # Default: 400.0
+        pitch_ki: 300.0 # Default: 400.0
+        yaw_ki: 10.0 # Default: 16.7
+        roll_kd: 2.5 # Default: 2.5
+        pitch_kd: 3.5 # Default: 2.5
+        yaw_kd: 5.5 # Default: 0.0
+
+    broadcasts:
+      num_repeats: 1 # number of times broadcast commands are repeated
+      delay_between_repeats_ms: 1 # delay in milliseconds between individual repeats

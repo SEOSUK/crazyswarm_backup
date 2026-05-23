@@ -4,11 +4,9 @@ command_publisher:
     velocity_tick: [0.1, 0.1, 0.1]
     yaw_tick_deg: 2.0
     force_tick: 0.01
-    command_frame: "end_effector"
-    end_effector_offset: [0.1, 0.0, 0.04]
     trajectory_none_label: "off"
-    trajectory_1_label: "circle_xy"
-    trajectory_2_label: "square_xy"
+    trajectory_1_label: "circle_yz"
+    trajectory_2_label: "square_yz"
 
 command_velocity_publisher:
   ros__parameters:

@@ -13,6 +13,10 @@
 
 using namespace std::chrono_literals;
 
+namespace {
+constexpr double kDegToRad = M_PI / 180.0;
+}
+
 class RvizVisual : public rclcpp::Node
 {
 public:
@@ -20,6 +24,7 @@ public:
   : Node("rviz_visual"),
     tf_broadcaster_(std::make_shared<tf2_ros::TransformBroadcaster>(this))
   {
+    data_topic_ = this->declare_parameter<std::string>("topic", "/data_logging_msg_debug");
     history_sample_period_ = this->declare_parameter<double>("history_sample_period", 0.2);
     history_duration_ = this->declare_parameter<double>("history_duration", 30.0);
     ee_offset_ = declareOffsetParameter();
@@ -29,14 +34,14 @@ public:
       rmw_qos_profile_sensor_data);
 
     sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
-      "/data_logging_msg", qos, std::bind(&RvizVisual::dataCallback, this, std::placeholders::_1));
+      data_topic_, qos, std::bind(&RvizVisual::dataCallback, this, std::placeholders::_1));
 
     timer_ = this->create_wall_timer(10ms, std::bind(&RvizVisual::publishTfTimer, this));
 
     raw_cmd_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/cmd_position_marker", 10);
     fw_cmd_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/fw_cmd_position_marker", 10);
-    raw_force_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/force_raw_marker", 10);
-    scaled_force_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/force_scaled_marker", 10);
+    raw_force_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/mob_force_pure_marker", 10);
+    scaled_force_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/mob_force_residual_marker", 10);
     acc_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/acc_marker", 10);
     vel_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/vel_marker", 10);
     wall_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/wall_marker", 10);
@@ -46,21 +51,21 @@ public:
     rpy_meas_.setZero();
     cmd_pos_.setZero();
     fw_cmd_pos_.setZero();
-    world_force_raw_.setZero();
-    world_force_scaled_.setZero();
+    mob_force_pure_.setZero();
+    mob_force_residual_.setZero();
     world_vel_.setZero();
     world_acc_.setZero();
 
-    RCLCPP_INFO(get_logger(), "rviz_visual started. subscribing /data_logging_msg");
+    RCLCPP_INFO(get_logger(), "rviz_visual started. subscribing %s", data_topic_.c_str());
   }
 
 private:
   void dataCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
   {
-    if (msg->data.size() < 52) {
+    if (msg->data.size() < 66) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000,
-        "msg size too small (%zu), expected >= 52", msg->data.size());
+        "msg size too small (%zu), expected >= 66", msg->data.size());
       return;
     }
 
@@ -72,30 +77,30 @@ private:
     rpy_meas_[1] = msg->data[4];
     rpy_meas_[2] = msg->data[5];
 
-    cmd_pos_[0] = msg->data[9];
-    cmd_pos_[1] = msg->data[10];
-    cmd_pos_[2] = msg->data[11];
-    cmd_yaw_rad_ = msg->data[12];
+    cmd_pos_[0] = msg->data[6];
+    cmd_pos_[1] = msg->data[7];
+    cmd_pos_[2] = msg->data[8];
+    cmd_yaw_deg_ = msg->data[9];
 
-    fw_cmd_pos_[0] = msg->data[13];
-    fw_cmd_pos_[1] = msg->data[14];
-    fw_cmd_pos_[2] = msg->data[15];
+    fw_cmd_pos_[0] = msg->data[10];
+    fw_cmd_pos_[1] = msg->data[11];
+    fw_cmd_pos_[2] = msg->data[12];
 
-    world_vel_[0] = msg->data[16];
-    world_vel_[1] = msg->data[17];
-    world_vel_[2] = msg->data[18];
+    world_vel_[0] = msg->data[30];
+    world_vel_[1] = msg->data[31];
+    world_vel_[2] = msg->data[32];
 
-    world_acc_[0] = msg->data[19];
-    world_acc_[1] = msg->data[20];
-    world_acc_[2] = msg->data[21];
+    world_acc_[0] = msg->data[36];
+    world_acc_[1] = msg->data[37];
+    world_acc_[2] = msg->data[38];
 
-    world_force_raw_[0] = msg->data[45];
-    world_force_raw_[1] = msg->data[46];
-    world_force_raw_[2] = msg->data[47];
+    mob_force_pure_[0] = msg->data[48];
+    mob_force_pure_[1] = msg->data[49];
+    mob_force_pure_[2] = msg->data[50];
 
-    world_force_scaled_[0] = msg->data[48];
-    world_force_scaled_[1] = msg->data[49];
-    world_force_scaled_[2] = msg->data[50];
+    mob_force_residual_[0] = msg->data[51];
+    mob_force_residual_[1] = msg->data[52];
+    mob_force_residual_[2] = msg->data[53];
   }
 
   void publishTfTimer()
@@ -138,7 +143,7 @@ private:
     tf_cmd.transform.translation.z = cmd_pos_[2];
 
     tf2::Quaternion q_cmd;
-    q_cmd.setRPY(0.0, 0.0, cmd_yaw_rad_);
+    q_cmd.setRPY(0.0, 0.0, cmd_yaw_deg_ * kDegToRad);
     tf_cmd.transform.rotation.x = q_cmd.x();
     tf_cmd.transform.rotation.y = q_cmd.y();
     tf_cmd.transform.rotation.z = q_cmd.z();
@@ -173,8 +178,8 @@ private:
     publishSphere(raw_cmd_pub_, stamp, "world", "cmd_position", 0, p_cmd, 0.05, 0.0f, 0.45f, 0.90f, 0.85f);
     publishSphere(fw_cmd_pub_, stamp, "world", "fw_cmd_position", 0, p_fw_cmd, 0.06, 0.90f, 0.35f, 0.10f, 0.90f);
 
-    publishArrow(raw_force_pub_, stamp, "world", "force_raw", 0, p0, world_force_raw_, 10.0, 0.02, 0.04, 0.06, 1.0f, 0.2f, 0.2f);
-    publishArrow(scaled_force_pub_, stamp, "world", "force_scaled", 0, p0, world_force_scaled_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
+    publishArrow(raw_force_pub_, stamp, "world", "mob_force_pure", 0, p0, mob_force_pure_, 10.0, 0.02, 0.04, 0.06, 1.0f, 0.2f, 0.2f);
+    publishArrow(scaled_force_pub_, stamp, "world", "mob_force_residual", 0, p0, mob_force_residual_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
     publishArrow(acc_pub_, stamp, "world", "acceleration", 0, p0, world_acc_, 0.5, 0.015, 0.03, 0.05, 0.0f, 0.0f, 1.0f);
     publishArrow(vel_pub_, stamp, "world", "velocity", 0, p0, world_vel_, 1.0, 0.015, 0.03, 0.05, 1.0f, 0.8f, 0.0f);
     publishWall(stamp);
@@ -391,12 +396,13 @@ private:
   Eigen::Vector3d rpy_meas_;
   Eigen::Vector3d cmd_pos_;
   Eigen::Vector3d fw_cmd_pos_;
-  double cmd_yaw_rad_{0.0};
-  Eigen::Vector3d world_force_raw_;
-  Eigen::Vector3d world_force_scaled_;
+  double cmd_yaw_deg_{0.0};
+  Eigen::Vector3d mob_force_pure_;
+  Eigen::Vector3d mob_force_residual_;
   Eigen::Vector3d world_vel_;
   Eigen::Vector3d world_acc_;
   std::array<double, 3> ee_offset_;
+  std::string data_topic_;
   double history_sample_period_{0.2};
   double history_duration_{30.0};
   rclcpp::Time last_history_sample_time_{0, 0, RCL_ROS_TIME};

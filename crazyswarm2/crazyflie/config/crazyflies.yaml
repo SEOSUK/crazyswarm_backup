@@ -72,19 +72,6 @@ robot_types:
       # ================================================
       #     Custom modules
       # ================================================
-      su_wrench:
-        cmd_fx: 0.0  # force command
-        Kf: 1.0  # force observer gain
-        Ktau: 1.0  # torque observer gain
-        Kp: 1.0  # translational momentum correction gain
-        Kh: 1.0  # rotational momentum correction gain
-        Keps: 1.0  # consistency residual correction gain
-        deadzone_F: 0.0
-        deadzone_T: 0.0
-        rOffX: 0.1
-        rOffY: 0.0
-        rOffZ: 0.04
-        consistencyMode: 2  # 0=None, 1=Residual, 2=Both
 
       kalman:
         resetEstimation: 0

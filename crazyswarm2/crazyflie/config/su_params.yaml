@@ -1,0 +1,36 @@
+robot_types:
+  cf21:
+    firmware_params:
+      su_wrench:
+        mass: 0.048  # observer mass model [kg]
+        Jxx: 1.9e-5  # observer inertia model [kg*m^2]
+        Jyy: 1.9e-5  # observer inertia model [kg*m^2]
+        Jzz: 3.0e-5  # observer inertia model [kg*m^2]
+        cmd_fx: 0.0  # force command
+        Kf: 30.0  # force observer gain
+        Ktau: 30.0  # torque observer gain
+        Kp: 10.9544511501  # translational momentum correction gain
+        Kh: 10.9544511501  # rotational momentum correction gain
+        Keps: 500.0  # consistency residual correction gain
+        deadzone_F: 0.0
+        deadzone_T: 0.0
+        comOffX: 0.0  # body-frame CoM offset x [m]
+        comOffY: 0.002  # body-frame CoM offset y [m]
+        comOffZ: 0.0  # body-frame CoM offset z [m]
+        rOffX: 0.1
+        rOffY: 0.0
+        rOffZ: 0.04
+        consistencyMode: 2  # 0=None, 1=Residual, 2=Both
+      su_position:
+        traj1Shape: 1  # 0=None, 1=Circle, 2=Square
+        traj1SizeX: 0.30  # y-axis radius/side length [m]
+        traj1SizeY: 0.30  # z-axis radius/side length [m]
+        traj1Period: 10.0  # [s]
+        traj2Shape: 2  # 0=None, 1=Circle, 2=Square
+        traj2SizeX: 0.30  # y-axis radius/side length [m]
+        traj2SizeY: 0.30  # z-axis radius/side length [m]
+        traj2Period: 10.0  # [s]
+        epsilonF: 0.01  # [N], yaw aligns to filtered MOB force when |F_xy| exceeds this
+        yawForceLpfHz: 0.2  # [Hz], first-order LPF cutoff for MOB-force yaw alignment (<=0 disables yaw align)
+shared_defaults:
+  command_reference: end_effector

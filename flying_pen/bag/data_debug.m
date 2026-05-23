@@ -34,7 +34,7 @@ set(groot, 'defaultFigureRenderer', 'painters');
 
 %% 0) User config
 sample_hz = 50.0;      % data_logging_debug loop_hz default
-mass_kg = 0.05;      % Crazyflie 2.1 Brushless mass
+mass_kg = 0.048;      % Crazyflie 2.1 Brushless mass
 gravity_ms2 = 9.81;
 defaultDir = fullfile(getenv("HOME"), "hitl_ws", "src", "flying_pen", "bag", "logging");
 if ~isfolder(defaultDir), defaultDir = pwd; end
@@ -191,7 +191,7 @@ acc_color = [0.2 0.6 0.2];
 pos_color = [0.4940 0.1840 0.5560];
 
 %% 5.5) Figure -1: accel/gyro inputs and offline attitude reconstruction
-panelm1_xlim = [10 100];                % e.g. [0 10]
+panelm1_xlim = [25 52];                % e.g. [0 10]
 panelm1_acc_ylim = [];            % fallback for all raw-acc subplots
 panelm1_gyro_ylim = [];           % fallback for all raw-gyro subplots
 panelm1_rpy_ylim = [];            % fallback for all attitude subplots
@@ -201,9 +201,9 @@ panelm1_acc_z_ylim = [];          % e.g. [-1.5 1.5]
 panelm1_gyro_x_ylim = [];         % e.g. [-100 100]
 panelm1_gyro_y_ylim = [];         % e.g. [-100 100]
 panelm1_gyro_z_ylim = [];         % e.g. [-100 100]
-panelm1_rpy_x_ylim = [];          % e.g. [-0.5 0.5]
-panelm1_rpy_y_ylim = [];          % e.g. [-0.5 0.5]
-panelm1_rpy_z_ylim = [];          % e.g. [-3.14 3.14]
+panelm1_rpy_x_ylim = [-0.1 0.1];          % e.g. [-0.5 0.5]
+panelm1_rpy_y_ylim = [-0.1 0.1];          % e.g. [-0.5 0.5]
+panelm1_rpy_z_ylim = [-0.1 0.1];          % e.g. [-3.14 3.14]
 
 panelm1_acc_axis_ylims = {panelm1_acc_x_ylim, panelm1_acc_y_ylim, panelm1_acc_z_ylim};
 panelm1_gyro_axis_ylims = {panelm1_gyro_x_ylim, panelm1_gyro_y_ylim, panelm1_gyro_z_ylim};
@@ -397,7 +397,7 @@ for i = 1:3
 end
 
 %% 7) Figure 1: MOB force compare / torque panel
-panel1_xlim = [30 110];                % e.g. [0 10]
+panel1_xlim = [10 200];                % e.g. [0 10]
 panel1_force_ylim = [];          % fallback for all MOB force subplots
 panel1_torque_ylim = [];         % fallback for all MOB torque subplots
 panel1_force_x_ylim = [-0.03 0.03];
@@ -487,11 +487,17 @@ title('Final actuator command');
 legend(motor_names, 'Location', 'best');
 
 nexttile;
+yyaxis left;
 plot(time, zero_bias_count, 'LineWidth', 1.2);
+ylabel('count');
+yyaxis right;
+plot(time, batt_pm, 'LineWidth', 1.2, 'Color', [0.85 0.33 0.10]); hold on;
+plot(time, batt_status, '--', 'LineWidth', 1.0, 'Color', [0.49 0.18 0.56]);
 grid on;
 xlabel('time [s]');
-ylabel('count');
-title('zero\_bias\_count');
+ylabel('voltage [V]');
+title('zero\_bias\_count and battery voltage');
+legend({'zero\_bias\_count', 'pm.vbat', 'status.battery\_voltage'}, 'Location', 'best');
 
 %% 10) Figure 5: velocity compare
 f5 = figure('Name', 'Debug Velocity', 'NumberTitle', 'off', 'Color', 'w');

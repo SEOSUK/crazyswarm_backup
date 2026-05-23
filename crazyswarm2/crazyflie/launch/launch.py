@@ -8,6 +8,7 @@ from launch.conditions import LaunchConfigurationEquals
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 
+
 def resolve_default_crazyflies_yaml_path():
     crazyflie_share = get_package_share_directory('crazyflie')
     default_path = os.path.join(crazyflie_share, 'config', 'crazyflies.yaml')
@@ -26,13 +27,33 @@ def resolve_default_crazyflies_yaml_path():
 
     return default_path
 
+
+def deep_merge_dict(dst, src):
+    for key, value in src.items():
+        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+            deep_merge_dict(dst[key], value)
+        else:
+            dst[key] = value
+
+
+def load_shared_su_params():
+    shared_path = os.path.join(get_package_share_directory('crazyflie'), 'config', 'su_params.yaml')
+    if not os.path.exists(shared_path):
+        return {}
+
+    with open(shared_path, 'r') as file:
+        return yaml.safe_load(file) or {}
+
+
 def parse_yaml(context):
-    # Load the crazyflies YAML file
     crazyflies_yaml = LaunchConfiguration('crazyflies_yaml_file').perform(context)
     with open(crazyflies_yaml, 'r') as file:
         crazyflies = yaml.safe_load(file)
 
-    # server params
+    shared_su_params = load_shared_su_params()
+    if shared_su_params:
+        deep_merge_dict(crazyflies, shared_su_params)
+
     server_yaml = os.path.join(
         get_package_share_directory('crazyflie'),
         'config',
@@ -42,7 +63,7 @@ def parse_yaml(context):
         server_yaml_content = yaml.safe_load(ymlfile)
 
     server_params = [crazyflies] + [server_yaml_content['/crazyflie_server']['ros__parameters']]
-    # robot description
+
     urdf = os.path.join(
         get_package_share_directory('crazyflie'),
         'urdf',
@@ -53,7 +74,6 @@ def parse_yaml(context):
 
     server_params[1]['robot_description'] = robot_desc
 
-    # construct motion_capture_configuration
     motion_capture_yaml = LaunchConfiguration('motion_capture_yaml_file').perform(context)
     with open(motion_capture_yaml, 'r') as ymlfile:
         motion_capture_content = yaml.safe_load(ymlfile)
@@ -61,15 +81,14 @@ def parse_yaml(context):
     motion_capture_params = motion_capture_content['/motion_capture_tracking']['ros__parameters']
     motion_capture_params['rigid_bodies'] = dict()
     for key, value in crazyflies['robots'].items():
-        type = crazyflies['robot_types'][value['type']]
-        if value['enabled'] and type['motion_capture']['enabled']:
-            motion_capture_params['rigid_bodies'][key] =  {
-                    'initial_position': value['initial_position'],
-                    'marker': type['motion_capture']['marker'],
-                    'dynamics': type['motion_capture']['dynamics'],
-                }
+        cf_type = crazyflies['robot_types'][value['type']]
+        if value['enabled'] and cf_type['motion_capture']['enabled']:
+            motion_capture_params['rigid_bodies'][key] = {
+                'initial_position': value['initial_position'],
+                'marker': cf_type['motion_capture']['marker'],
+                'dynamics': cf_type['motion_capture']['dynamics'],
+            }
 
-    # copy relevent settings to server params
     server_params[1]['poses_qos_deadline'] = motion_capture_params['topics']['poses']['qos']['deadline']
 
     return [
@@ -79,34 +98,35 @@ def parse_yaml(context):
             condition=IfCondition(PythonExpression(["'", LaunchConfiguration('backend'), "' != 'sim' and '", LaunchConfiguration('mocap'), "' == 'True'"])),
             name='motion_capture_tracking',
             output='screen',
-            parameters= [motion_capture_params],
+            parameters=[motion_capture_params],
         ),
         Node(
             package='crazyflie',
             executable='crazyflie_server.py',
-            condition=LaunchConfigurationEquals('backend','cflib'),
+            condition=LaunchConfigurationEquals('backend', 'cflib'),
             name='crazyflie_server',
             output='screen',
-            parameters= server_params,
+            parameters=server_params,
         ),
         Node(
             package='crazyflie',
             executable='crazyflie_server',
-            condition=LaunchConfigurationEquals('backend','cpp'),
+            condition=LaunchConfigurationEquals('backend', 'cpp'),
             name='crazyflie_server',
             output='screen',
-            parameters= server_params,
+            parameters=server_params,
             prefix=PythonExpression(['"xterm -e gdb -ex run --args" if ', LaunchConfiguration('debug'), ' else ""']),
         ),
         Node(
             package='crazyflie_sim',
             executable='crazyflie_server',
-            condition=LaunchConfigurationEquals('backend','sim'),
+            condition=LaunchConfigurationEquals('backend', 'sim'),
             name='crazyflie_server',
             output='screen',
             emulate_tty=True,
-            parameters= server_params,
+            parameters=server_params,
         )]
+
 
 def generate_launch_description():
     default_crazyflies_yaml_path = resolve_default_crazyflies_yaml_path()
@@ -127,12 +147,9 @@ def generate_launch_description():
         'teleop.yaml')
 
     return LaunchDescription([
-        DeclareLaunchArgument('crazyflies_yaml_file',
-                              default_value=default_crazyflies_yaml_path),
-        DeclareLaunchArgument('motion_capture_yaml_file',
-                              default_value=default_motion_capture_yaml_path),
-        DeclareLaunchArgument('rviz_config_file',
-                              default_value=default_rviz_config_path),
+        DeclareLaunchArgument('crazyflies_yaml_file', default_value=default_crazyflies_yaml_path),
+        DeclareLaunchArgument('motion_capture_yaml_file', default_value=default_motion_capture_yaml_path),
+        DeclareLaunchArgument('rviz_config_file', default_value=default_rviz_config_path),
         DeclareLaunchArgument('backend', default_value='cpp'),
         DeclareLaunchArgument('debug', default_value='False'),
         DeclareLaunchArgument('rviz', default_value='False'),
@@ -151,18 +168,14 @@ def generate_launch_description():
                 ('arm', 'all/arm'),
                 ('takeoff', 'all/takeoff'),
                 ('land', 'all/land'),
-                # uncomment to manually control (and update teleop.yaml)
-                # ('cmd_vel_legacy', 'cf6/cmd_vel_legacy'),
-                # ('cmd_full_state', 'cf6/cmd_full_state'),
-                # ('notify_setpoints_stop', 'cf6/notify_setpoints_stop'),
             ],
-            parameters= [PythonExpression(["'" + telop_yaml_path +"' if '", LaunchConfiguration('teleop_yaml_file'), "' == '' else '", LaunchConfiguration('teleop_yaml_file'), "'"])],
+            parameters=[PythonExpression(["'" + telop_yaml_path + "' if '", LaunchConfiguration('teleop_yaml_file'), "' == '' else '", LaunchConfiguration('teleop_yaml_file'), "'"])],
         ),
         Node(
             condition=LaunchConfigurationEquals('teleop', 'True'),
             package='joy',
             executable='joy_node',
-            name='joy_node' # by default id=0
+            name='joy_node'
         ),
         Node(
             condition=LaunchConfigurationEquals('rviz', 'True'),
@@ -172,7 +185,7 @@ def generate_launch_description():
             name='rviz2',
             arguments=['-d', LaunchConfiguration('rviz_config_file')],
             parameters=[{
-                "use_sim_time": PythonExpression(["'", LaunchConfiguration('backend'), "' == 'sim'"]),
+                'use_sim_time': PythonExpression(["'", LaunchConfiguration('backend'), "' == 'sim'"]),
             }]
         ),
         Node(
@@ -182,8 +195,8 @@ def generate_launch_description():
             executable='gui.py',
             name='gui',
             parameters=[{
-                "use_sim_time": PythonExpression(["'", LaunchConfiguration('backend'), "' == 'sim'"]),
-           }]
+                'use_sim_time': PythonExpression(["'", LaunchConfiguration('backend'), "' == 'sim'"]),
+            }]
         ),
         Node(
             package='crazyflie_examples',

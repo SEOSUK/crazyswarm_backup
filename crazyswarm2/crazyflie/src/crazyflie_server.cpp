@@ -648,12 +648,17 @@ private:
       msg->trajectory_mode <= crazyflie_interfaces::msg::PositionControl::TRAJECTORY_2
         ? msg->trajectory_mode
         : crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE;
+    const uint8_t requested_reference =
+      msg->command_reference == crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR
+        ? crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR
+        : crazyflie_interfaces::msg::PositionControl::REFERENCE_DRONE;
 
     const uint8_t payload[] = {
       kPositionControlTriggerMagic,
       kPositionControlTriggerVersion,
       requested_mode,
       requested_trajectory,
+      requested_reference,
     };
     cf_.sendAppChannelPacket(payload, sizeof(payload));
   }

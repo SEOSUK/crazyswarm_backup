@@ -140,14 +140,10 @@ public:
       cf_ns_ + "/cf_su_voltage", 10, std::bind(&DataLoggingDebugNode::voltageCallback, this, _1));
     sub_debug_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_su_debug", 10, std::bind(&DataLoggingDebugNode::debugCallback, this, _1));
-    sub_mob_force_none_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_su_mob_force_none", 10, std::bind(&DataLoggingDebugNode::mobForceNoneCallback, this, _1));
-    sub_mob_force_residual_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_su_mob_force_residual", 10, std::bind(&DataLoggingDebugNode::mobForceResidualCallback, this, _1));
-    sub_mob_torque_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_su_mob_torque", 10, std::bind(&DataLoggingDebugNode::mobTorqueCallback, this, _1));
+    sub_mob_pure_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_mob_pure", 10, std::bind(&DataLoggingDebugNode::mobPureCallback, this, _1));
     sub_mob_residual_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_su_mob_residual", 10, std::bind(&DataLoggingDebugNode::mobResidualCallback, this, _1));
+      cf_ns_ + "/cf_mob_residual", 10, std::bind(&DataLoggingDebugNode::mobResidualCallback, this, _1));
 
     RCLCPP_INFO(get_logger(), "data_logging_debug node started");
   }
@@ -340,10 +336,22 @@ private:
     }
   }
 
-  void mobForceNoneCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, mob_force_none_); }
-  void mobForceResidualCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, mob_force_residual_); }
-  void mobTorqueCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, mob_torque_); }
-  void mobResidualCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, mob_residual_); }
+  void mobPureCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (msg->values.size() >= 6) {
+      mob_force_none_[0] = msg->values[0];
+      mob_force_none_[1] = msg->values[1];
+      mob_force_none_[2] = msg->values[2];
+      mob_torque_[0] = msg->values[3];
+      mob_torque_[1] = msg->values[4];
+      mob_torque_[2] = msg->values[5];
+    }
+  }
+
+  void mobResidualCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    copy3(msg, mob_force_residual_);
+  }
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr data_pub_;
 
@@ -365,9 +373,7 @@ private:
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_att_des_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_voltage_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_debug_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_force_none_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_force_residual_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_torque_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_pure_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_residual_;
 
   std::string csv_dir_;

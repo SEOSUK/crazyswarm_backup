@@ -17,11 +17,14 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <fstream>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
 using namespace std::chrono_literals;
+static constexpr auto kVelocityModeHandoffDelay = 150ms;
 
 class CommandPublisher : public rclcpp::Node
 {
@@ -51,6 +54,9 @@ public:
     pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
       "cf2/pose", 10,
       std::bind(&CommandPublisher::poseCallback, this, std::placeholders::_1));
+    fw_cmd_sub_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      "cf2/cf_ctrl_target_pos", 10,
+      std::bind(&CommandPublisher::fwCmdPositionCallback, this, std::placeholders::_1));
     mob_force_sub_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       "cf2/cf_Fext_MOB", 10,
       std::bind(&CommandPublisher::mobForceCallback, this, std::placeholders::_1));
@@ -65,8 +71,8 @@ public:
     velocity_tick_ = declareVector3Parameter("velocity_tick", {0.1, 0.1, 0.1});
     yaw_tick_deg_ = this->declare_parameter<double>("yaw_tick_deg", 2.0);
     force_delta_ = this->declare_parameter<double>("force_tick", 0.01);
-    command_frame_ = this->declare_parameter<std::string>("command_frame", "end_effector");
-    end_effector_offset_ = declareVector3Parameter("end_effector_offset", {0.1, 0.0, 0.04});
+    command_frame_ = this->declare_parameter<std::string>("command_frame", loadSharedCommandFrameDefault());
+    end_effector_offset_ = declareVector3Parameter("end_effector_offset", loadSharedEndEffectorOffsetDefault());
 
     trajectory_label_none_ = this->declare_parameter<std::string>("trajectory_none_label", "none");
     trajectory_label_1_ = this->declare_parameter<std::string>("trajectory_1_label", "trajectory_1");
@@ -75,6 +81,7 @@ public:
     cmd_xyz_yaw_.fill(0.0);
     force_des_ = 0.0;
     current_mode_ = crazyflie_interfaces::msg::PositionControl::MODE_POSITION;
+    current_command_reference_ = parseCommandReference(command_frame_);
     current_trajectory_mode_ = crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE;
     mob_force_.fill(std::numeric_limits<double>::quiet_NaN());
     latest_battery_voltage_ = std::numeric_limits<double>::quiet_NaN();
@@ -84,6 +91,7 @@ public:
     status_msg_ = "ready";
     last_battery_display_update_ = std::chrono::steady_clock::now();
     has_latest_pose_ = false;
+    has_latest_fw_cmd_ = false;
 
     last_inputs_.clear();
     for (size_t i = 0; i < HISTORY_LEN; ++i) {
@@ -158,6 +166,92 @@ private:
     return result;
   }
 
+  std::string loadSharedCommandFrameDefault() const
+  {
+    const auto shared_yaml =
+      ament_index_cpp::get_package_share_directory("crazyflie") + "/config/su_params.yaml";
+    std::ifstream file(shared_yaml);
+    if (!file.is_open()) {
+      return "end_effector";
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+      if (line.find("command_reference:") == std::string::npos) {
+        continue;
+      }
+
+      const auto colon = line.find(':');
+      if (colon == std::string::npos || colon + 1 >= line.size()) {
+        break;
+      }
+
+      std::string value = line.substr(colon + 1);
+      value.erase(0, value.find_first_not_of(" \t"));
+      const auto last = value.find_last_not_of(" \t\r\n");
+      if (last != std::string::npos) {
+        value.erase(last + 1);
+      } else {
+        value.clear();
+      }
+
+      return value == "drone" ? "drone" : "end_effector";
+    }
+
+    return "end_effector";
+  }
+
+  std::vector<double> loadSharedEndEffectorOffsetDefault() const
+  {
+    const auto shared_yaml =
+      ament_index_cpp::get_package_share_directory("crazyflie") + "/config/su_params.yaml";
+    std::ifstream file(shared_yaml);
+    if (!file.is_open()) {
+      return {0.1, 0.0, 0.04};
+    }
+
+    bool insideSuWrench = false;
+    std::array<double, 3> offset{{0.1, 0.0, 0.04}};
+    std::array<bool, 3> found{{false, false, false}};
+    std::string line;
+    while (std::getline(file, line)) {
+      if (!insideSuWrench) {
+        if (line.find("su_wrench:") != std::string::npos) {
+          insideSuWrench = true;
+        }
+        continue;
+      }
+
+      if (line.rfind("      su_", 0) == 0 && line.find("su_wrench:") == std::string::npos) {
+        break;
+      }
+
+      auto parseValue = [&](const std::string & key, double & dst, bool & ok) {
+        if (line.find(key) == std::string::npos) {
+          return;
+        }
+        const auto colon = line.find(':');
+        if (colon == std::string::npos || colon + 1 >= line.size()) {
+          return;
+        }
+        try {
+          dst = std::stod(line.substr(colon + 1));
+          ok = true;
+        } catch (...) {
+        }
+      };
+
+      parseValue("rOffX:", offset[0], found[0]);
+      parseValue("rOffY:", offset[1], found[1]);
+      parseValue("rOffZ:", offset[2], found[2]);
+      if (found[0] && found[1] && found[2]) {
+        return {offset[0], offset[1], offset[2]};
+      }
+    }
+
+    return {offset[0], offset[1], offset[2]};
+  }
+
   void timerCallback()
   {
     int ch = 0;
@@ -184,6 +278,8 @@ private:
     else if (c == 'x')  { resetActiveCommand(); }
     else if (c == 'i')  { setPositionMode(crazyflie_interfaces::msg::PositionControl::MODE_VELOCITY); }
     else if (c == 'u')  { setPositionMode(crazyflie_interfaces::msg::PositionControl::MODE_POSITION); }
+    else if (c == 'f')  { setCommandReference(crazyflie_interfaces::msg::PositionControl::REFERENCE_DRONE); }
+    else if (c == 'g')  { setCommandReference(crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR); }
     else if (c == 'b')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE); }
     else if (c == 'n')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_1); }
     else if (c == 'm')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_2); }
@@ -203,6 +299,18 @@ private:
   bool isVelocityMode() const
   {
     return current_mode_ == crazyflie_interfaces::msg::PositionControl::MODE_VELOCITY;
+  }
+
+  uint8_t parseCommandReference(const std::string & frame) const
+  {
+    return frame == "drone" ?
+      crazyflie_interfaces::msg::PositionControl::REFERENCE_DRONE :
+      crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR;
+  }
+
+  bool isEndEffectorReference() const
+  {
+    return current_command_reference_ == crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR;
   }
 
   void onPositiveX()
@@ -282,15 +390,27 @@ private:
       cmd_xyz_yaw_[0] = 0.0;
       cmd_xyz_yaw_[1] = 0.0;
       cmd_xyz_yaw_[2] = 0.0;
-      status_msg_ = "entered VELOCITY mode, velocity command reset";
+      velocity_mode_command_ready_time_ = std::chrono::steady_clock::now() + kVelocityModeHandoffDelay;
+      status_msg_ = "entered VELOCITY mode, current position reference preserved in firmware";
       pushInputHistory("i : enter velocity mode");
     } else {
-      if (has_latest_pose_) {
-        cmd_xyz_yaw_[0] = latest_pose_xyz_yaw_[0];
-        cmd_xyz_yaw_[1] = latest_pose_xyz_yaw_[1];
-        cmd_xyz_yaw_[2] = latest_pose_xyz_yaw_[2];
+      velocity_mode_command_ready_time_ = std::chrono::steady_clock::time_point{};
+      if (has_latest_fw_cmd_) {
+        const auto latest_reference_cmd = latestFwCommandInActiveReferenceFrame();
+        cmd_xyz_yaw_[0] = latest_reference_cmd[0];
+        cmd_xyz_yaw_[1] = latest_reference_cmd[1];
+        cmd_xyz_yaw_[2] = latest_reference_cmd[2];
+        if (has_latest_pose_) {
+          cmd_xyz_yaw_[3] = latest_pose_xyz_yaw_[3];
+        }
+        status_msg_ = "entered POSITION mode, command aligned to firmware final reference";
+      } else if (has_latest_pose_) {
+        const auto latest_reference_pose = latestPoseInActiveReferenceFrame();
+        cmd_xyz_yaw_[0] = latest_reference_pose[0];
+        cmd_xyz_yaw_[1] = latest_reference_pose[1];
+        cmd_xyz_yaw_[2] = latest_reference_pose[2];
         cmd_xyz_yaw_[3] = latest_pose_xyz_yaw_[3];
-        status_msg_ = "entered POSITION mode, command aligned to latest pose";
+        status_msg_ = "entered POSITION mode, firmware reference unavailable so command aligned to latest pose";
       } else {
         cmd_xyz_yaw_[0] = 0.0;
         cmd_xyz_yaw_[1] = 0.0;
@@ -302,6 +422,36 @@ private:
 
     current_mode_ = mode;
     publishPositionControl();
+  }
+
+  void setCommandReference(uint8_t commandReference)
+  {
+    if (commandReference == current_command_reference_) {
+      status_msg_ = isEndEffectorReference() ? "already in END_EFFECTOR reference" : "already in DRONE reference";
+      return;
+    }
+
+    if (!isVelocityMode() && has_latest_pose_) {
+      const auto latest_reference_pose =
+        commandReference == crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR ?
+          latestPoseInReferenceFrame(crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR) :
+          latestPoseInReferenceFrame(crazyflie_interfaces::msg::PositionControl::REFERENCE_DRONE);
+      cmd_xyz_yaw_[0] = latest_reference_pose[0];
+      cmd_xyz_yaw_[1] = latest_reference_pose[1];
+      cmd_xyz_yaw_[2] = latest_reference_pose[2];
+      cmd_xyz_yaw_[3] = latest_pose_xyz_yaw_[3];
+    }
+
+    current_command_reference_ = commandReference;
+    command_frame_ = isEndEffectorReference() ? "end_effector" : "drone";
+    publishPositionControl();
+    if (isEndEffectorReference()) {
+      status_msg_ = "command reference set to END_EFFECTOR";
+      pushInputHistory("g : command ref -> end_effector");
+    } else {
+      status_msg_ = "command reference set to DRONE";
+      pushInputHistory("f : command ref -> drone");
+    }
   }
 
   void setTrajectoryMode(uint8_t trajectoryMode)
@@ -331,9 +481,10 @@ private:
       pushInputHistory("x : zero velocity cmd");
     } else {
       if (has_latest_pose_) {
-        cmd_xyz_yaw_[0] = latest_pose_xyz_yaw_[0];
-        cmd_xyz_yaw_[1] = latest_pose_xyz_yaw_[1];
-        cmd_xyz_yaw_[2] = latest_pose_xyz_yaw_[2];
+        const auto latest_reference_pose = latestPoseInActiveReferenceFrame();
+        cmd_xyz_yaw_[0] = latest_reference_pose[0];
+        cmd_xyz_yaw_[1] = latest_reference_pose[1];
+        cmd_xyz_yaw_[2] = latest_reference_pose[2];
         cmd_xyz_yaw_[3] = latest_pose_xyz_yaw_[3];
         status_msg_ = "position command aligned to latest pose";
         pushInputHistory("x : hold current pose");
@@ -349,13 +500,18 @@ private:
 
   void publishPositionCmd()
   {
+    if (isVelocityMode() &&
+        velocity_mode_command_ready_time_.time_since_epoch().count() > 0 &&
+        std::chrono::steady_clock::now() < velocity_mode_command_ready_time_) {
+      return;
+    }
+
     crazyflie_interfaces::msg::Position msg;
-    const auto command = resolvePublishedPositionCommand();
     msg.header.stamp = this->get_clock()->now();
     msg.header.frame_id = "world";
-    msg.x = static_cast<float>(command[0]);
-    msg.y = static_cast<float>(command[1]);
-    msg.z = static_cast<float>(command[2]);
+    msg.x = static_cast<float>(cmd_xyz_yaw_[0]);
+    msg.y = static_cast<float>(cmd_xyz_yaw_[1]);
+    msg.z = static_cast<float>(cmd_xyz_yaw_[2]);
     msg.yaw = static_cast<float>(cmd_xyz_yaw_[3]);
     cf_position_pub_->publish(msg);
   }
@@ -373,22 +529,47 @@ private:
     }};
   }
 
-  std::array<double, 3> resolvePublishedPositionCommand() const
+  std::array<double, 3> latestPoseInReferenceFrame(uint8_t commandReference) const
   {
-    std::array<double, 3> command{{
-      cmd_xyz_yaw_[0],
-      cmd_xyz_yaw_[1],
-      cmd_xyz_yaw_[2]
+    std::array<double, 3> pose{{
+      latest_pose_xyz_yaw_[0],
+      latest_pose_xyz_yaw_[1],
+      latest_pose_xyz_yaw_[2]
     }};
 
-    if (isVelocityMode() || command_frame_ != "end_effector") {
+    if (commandReference != crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR) {
+      return pose;
+    }
+
+    const auto rotated_offset = rotateOffsetByYawDeg(latest_pose_xyz_yaw_[3]);
+    pose[0] += rotated_offset[0];
+    pose[1] += rotated_offset[1];
+    pose[2] += rotated_offset[2];
+    return pose;
+  }
+
+  std::array<double, 3> latestPoseInActiveReferenceFrame() const
+  {
+    return latestPoseInReferenceFrame(current_command_reference_);
+  }
+
+  std::array<double, 3> latestFwCommandInActiveReferenceFrame() const
+  {
+    std::array<double, 3> command{{
+      latest_fw_cmd_xyz_[0],
+      latest_fw_cmd_xyz_[1],
+      latest_fw_cmd_xyz_[2]
+    }};
+
+    if (!isEndEffectorReference()) {
       return command;
     }
 
-    const auto rotated_offset = rotateOffsetByYawDeg(cmd_xyz_yaw_[3]);
-    command[0] -= rotated_offset[0];
-    command[1] -= rotated_offset[1];
-    command[2] -= rotated_offset[2];
+    const double yaw_deg = has_latest_pose_ ? latest_pose_xyz_yaw_[3] : cmd_xyz_yaw_[3];
+    const auto rotated_offset = rotateOffsetByYawDeg(yaw_deg);
+    command[0] += rotated_offset[0];
+    command[1] += rotated_offset[1];
+    command[2] += rotated_offset[2];
     return command;
   }
 
@@ -401,6 +582,7 @@ private:
     crazyflie_interfaces::msg::PositionControl msg;
     msg.header.stamp = this->get_clock()->now();
     msg.position_mode = current_mode_;
+    msg.command_reference = current_command_reference_;
     msg.trajectory_mode = current_trajectory_mode_;
     position_control_pub_->publish(msg);
   }
@@ -529,6 +711,18 @@ private:
     has_latest_pose_ = true;
   }
 
+  void fwCmdPositionCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (!msg || msg->values.size() < 3) {
+      return;
+    }
+
+    latest_fw_cmd_xyz_[0] = msg->values[0];
+    latest_fw_cmd_xyz_[1] = msg->values[1];
+    latest_fw_cmd_xyz_[2] = msg->values[2];
+    has_latest_fw_cmd_ = true;
+  }
+
   void mobForceCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
   {
     if (!msg || msg->values.size() < 3) {
@@ -592,8 +786,8 @@ private:
     clear();
 
     drawSepLine(ROW_USAGE_HEADER, "usage");
-    mvprintw(ROW_USAGE_1, 0, "position: w/s(x), a/d(y), e/q(z), z/c(yaw), x(hold/reset), i->velocity");
-    mvprintw(ROW_USAGE_2, 0, "velocity: w/s/a/d/e/q(v), x(zero vel), u->position, b(off), n(traj1), m(traj2)");
+    mvprintw(ROW_USAGE_1, 0, "position: w/s(x), a/d(y), e/q(z), z/c(yaw), x(hold/reset), i->velocity, f/g(ref)");
+    mvprintw(ROW_USAGE_2, 0, "velocity: w/s/a/d/e/q(v), x(zero vel), u->position, b(off), n(traj1), m(traj2), f/g(ref)");
     mvprintw(ROW_USAGE_3, 0, "force/bias: j/k/l (cmd_fx), r(zero bias), o/p arm/disarm, t quit");
 
     drawSepLine(ROW_STATUS_HEADER, "status");
@@ -679,20 +873,16 @@ private:
 
   void drawCommandBlock()
   {
-    const auto published = resolvePublishedPositionCommand();
-
     move(ROW_CMD_LINE1, 0);
     clrtoeol();
     if (isVelocityMode()) {
       printw(
-        "velocity cmd xyz = %.3f , %.3f , %.3f -> published xyz = %.3f , %.3f , %.3f",
-        cmd_xyz_yaw_[0], cmd_xyz_yaw_[1], cmd_xyz_yaw_[2],
-        published[0], published[1], published[2]);
+        "velocity cmd xyz = %.3f , %.3f , %.3f (reference=%s)",
+        cmd_xyz_yaw_[0], cmd_xyz_yaw_[1], cmd_xyz_yaw_[2], command_frame_.c_str());
     } else {
       printw(
-        "position cmd xyz = %.3f , %.3f , %.3f -> published xyz = %.3f , %.3f , %.3f",
-        cmd_xyz_yaw_[0], cmd_xyz_yaw_[1], cmd_xyz_yaw_[2],
-        published[0], published[1], published[2]);
+        "position cmd xyz = %.3f , %.3f , %.3f (reference=%s)",
+        cmd_xyz_yaw_[0], cmd_xyz_yaw_[1], cmd_xyz_yaw_[2], command_frame_.c_str());
     }
 
     move(ROW_CMD_LINE2, 0);
@@ -722,6 +912,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr force_pub_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Status>::SharedPtr status_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr fw_cmd_sub_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr mob_force_sub_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr zero_bias_dbg_sub_;
   std::shared_ptr<rclcpp::AsyncParametersClient> param_client_;
@@ -729,6 +920,7 @@ private:
 
   std::array<double, 4> cmd_xyz_yaw_;
   std::array<double, 4> latest_pose_xyz_yaw_{{0.0, 0.0, 0.0, 0.0}};
+  std::array<double, 3> latest_fw_cmd_xyz_{{0.0, 0.0, 0.0}};
   std::array<double, 3> position_tick_;
   std::array<double, 3> velocity_tick_;
   std::array<double, 3> end_effector_offset_;
@@ -740,8 +932,10 @@ private:
   double displayed_battery_voltage_;
   double zero_bias_count_;
   uint8_t current_mode_;
+  uint8_t current_command_reference_;
   uint8_t current_trajectory_mode_;
   bool has_latest_pose_;
+  bool has_latest_fw_cmd_;
   std::string command_frame_;
   std::string trajectory_label_none_;
   std::string trajectory_label_1_;
@@ -749,6 +943,7 @@ private:
   std::string status_msg_;
   std::string zero_bias_last_result_;
   std::chrono::steady_clock::time_point last_battery_display_update_;
+  std::chrono::steady_clock::time_point velocity_mode_command_ready_time_{};
   std::deque<std::string> last_inputs_;
 };
 

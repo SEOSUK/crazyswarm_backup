@@ -28,8 +28,17 @@ def launch_setup(context, *args, **kwargs):
     log_player_params = os.path.join(log_player_share, "config", "parameters.yaml")
     wrench_params = os.path.join(log_player_share, "config", "wrench_observer.yaml")
     normal_params = os.path.join(log_player_share, "config", "normal_vector_estimation.yaml")
+    shared_su_params = os.path.join(get_package_share_directory("crazyflie"), "config", "su_params.yaml")
     with open(runtime_params, "r", encoding="utf-8") as f:
         runtime_cfg = yaml.safe_load(f) or {}
+    with open(shared_su_params, "r", encoding="utf-8") as f:
+        shared_su_cfg = yaml.safe_load(f) or {}
+    su_wrench_cfg = shared_su_cfg.get("robot_types", {}).get("cf21", {}).get("firmware_params", {}).get("su_wrench", {})
+    shared_ee_offset = [
+        su_wrench_cfg.get("rOffX", 0.1),
+        su_wrench_cfg.get("rOffY", 0.0),
+        su_wrench_cfg.get("rOffZ", 0.04),
+    ]
     runtime_mode = runtime_cfg.get("runtime", {}).get("ros__parameters", {}).get("mode", "default")
     urdf_path = urdf_debug_path if runtime_mode == "debug" else urdf_default_path
 
@@ -127,7 +136,7 @@ def launch_setup(context, *args, **kwargs):
                     executable="rviz_visual",
                     name="rviz_visual",
                     output="screen",
-                    parameters=[rviz_visual_params],
+                    parameters=[rviz_visual_params, {"end_effector_offset": shared_ee_offset}],
                 )
             ],
         )

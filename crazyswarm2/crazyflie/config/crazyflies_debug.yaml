@@ -49,7 +49,6 @@ robot_types:
         cf_su_acc:
           frequency: 20
           vars: [suWrenchObs.accWx, suWrenchObs.accWy, suWrenchObs.accWz]
-#         # Desired translational velocity from the position controller.
         vel_des:
           frequency: 10
           vars: [posCtl.targetVX, posCtl.targetVY, posCtl.targetVZ]
@@ -61,6 +60,13 @@ robot_types:
         cf_su_voltage:
           frequency: 10
           vars: [pm.vbat]
+        cf_mob_pure:
+          frequency: 20
+          vars: [suWrenchObs.fHatNWx, suWrenchObs.fHatNWy, suWrenchObs.fHatNWz, suWrenchObs.tauLWx, suWrenchObs.tauLWy, suWrenchObs.tauLWz]
+        cf_mob_residual:
+          frequency: 20
+          vars: [suWrenchObs.fHatRWx, suWrenchObs.fHatRWy, suWrenchObs.fHatRWz]
+#         # Desired translational velocity from the position controller.
 
 
     firmware_params:
@@ -78,6 +84,27 @@ robot_types:
         accBiasX: 0.0
         accBiasY: 0.0
         accBiasZ: 0.0
+
+      su_wrench:
+        mass: 0.0393  # observer mass model [kg]
+        Jxx: 1.9e-5  # observer inertia model [kg*m^2]
+        Jyy: 1.9e-5  # observer inertia model [kg*m^2]
+        Jzz: 3.0e-5  # observer inertia model [kg*m^2]
+        cmd_fx: 0.0  # force command
+        Kf: 1.0  # force observer gain
+        Ktau: 1.0  # torque observer gain
+        Kp: 1.0  # translational momentum correction gain
+        Kh: 1.0  # rotational momentum correction gain
+        Keps: 1.0  # consistency residual correction gain
+        deadzone_F: 0.0
+        deadzone_T: 0.0
+        comOffX: 0.0  # body-frame CoM offset x [m]
+        comOffY: 0.0  # body-frame CoM offset y [m]
+        comOffZ: 0.0  # body-frame CoM offset z [m]
+        rOffX: 0.1
+        rOffY: 0.0
+        rOffZ: 0.04
+        consistencyMode: 2  # 0=None, 1=Residual, 2=Both
 
       kalman:
         resetEstimation: 0

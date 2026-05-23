@@ -191,6 +191,10 @@ public:
     float z,
     float yaw);
 
+  void sendAppChannelPacket(
+    const uint8_t* data,
+    size_t length);
+
   void notifySetpointsStop(uint32_t remainValidMillisecs);
 
   void sendStop();

@@ -61,26 +61,27 @@ class DataLoggingDebugNode : public rclcpp::Node
 public:
   //  0.. 5 : pose_x y z roll pitch yaw
   //  6.. 9 : cmd_x y z yaw [m, rad]
-  // 10..13 : thrust_f1 f2 f3 f4 [N]
-  // 14..17 : pwm_1 2 3 4 [ratio]
-  // 18..20 : body_force xyz [N]
-  // 21..23 : world_force xyz [N]
-  // 24..26 : body_torque xyz [N*m]
-  // 27..29 : state_vel xyz [m/s]
-  // 30..32 : pos_vel xyz [m/s]
-  // 33..35 : acc xyz [m/s^2]
-  // 36..38 : vel_des xyz [m/s]
-  // 39..41 : att_des rpy [deg]
-  // 42     : status_battery_voltage [V]
-  // 43     : pm_vbat [V]
-  // 44     : zero_bias_count
-  // 45..47 : mob_force_none xyz [N]
-  // 48..50 : mob_force_residual xyz [N]
-  // 51..53 : mob_torque xyz [N*m]
-  // 54..56 : mob_residual xyz [N*m]
-  // 57..59 : body-frame accel xyz [G], after manual bias correction and before gravity-trim/LPF
-  // 60..62 : body-frame gyro xyz [deg/s], Mahony/complementary gyro input
-  static constexpr int kDataLen = 63;
+  // 10..12 : fw_cmd_x y z [m]
+  // 13..16 : thrust_f1 f2 f3 f4 [N]
+  // 17..20 : pwm_1 2 3 4 [ratio]
+  // 21..23 : body_force xyz [N]
+  // 24..26 : world_force xyz [N]
+  // 27..29 : body_torque xyz [N*m]
+  // 30..32 : state_vel xyz [m/s]
+  // 33..35 : pos_vel xyz [m/s]
+  // 36..38 : acc xyz [m/s^2]
+  // 39..41 : vel_des xyz [m/s]
+  // 42..44 : att_des rpy [deg]
+  // 45     : status_battery_voltage [V]
+  // 46     : pm_vbat [V]
+  // 47     : zero_bias_count
+  // 48..50 : mob_force_none xyz [N]
+  // 51..53 : mob_force_residual xyz [N]
+  // 54..56 : mob_torque xyz [N*m]
+  // 57..59 : mob_residual xyz [N*m]
+  // 60..62 : body-frame accel xyz [G], after manual bias correction and before gravity-trim/LPF
+  // 63..65 : body-frame gyro xyz [deg/s], Mahony/complementary gyro input
+  static constexpr int kDataLen = 66;
 
   DataLoggingDebugNode()
   : Node("data_logging_debug")
@@ -107,6 +108,8 @@ public:
       cf_ns_ + "/pose", 10, std::bind(&DataLoggingDebugNode::poseCallback, this, _1));
     sub_cmd_position_ = this->create_subscription<crazyflie_interfaces::msg::Position>(
       cf_ns_ + "/cmd_position", 10, std::bind(&DataLoggingDebugNode::cmdPositionCallback, this, _1));
+    sub_fw_cmd_position_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_ctrl_target_pos", 10, std::bind(&DataLoggingDebugNode::fwCmdPositionCallback, this, _1));
     sub_status_ = this->create_subscription<crazyflie_interfaces::msg::Status>(
       cf_ns_ + "/status", 10, std::bind(&DataLoggingDebugNode::statusCallback, this, _1));
     sub_motor_thrust_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
@@ -167,6 +170,7 @@ public:
     push3(out, pose_xyz_);
     push3(out, pose_rpy_);
     push4(out, cmd_xyzyaw_);
+    push3(out, fw_cmd_xyz_);
     push4(out, motor_thrust_);
     push4(out, motor_pwm_);
     push3(out, body_force_);
@@ -235,6 +239,7 @@ private:
     csv_
       << "pose_x,pose_y,pose_z,pose_roll,pose_pitch,pose_yaw,"
       << "cmd_x,cmd_y,cmd_z,cmd_yaw,"
+      << "fwCmd_x,fwCmd_y,fwCmd_z,"
       << "f1,f2,f3,f4,"
       << "pwm1,pwm2,pwm3,pwm4,"
       << "bodyFx,bodyFy,bodyFz,"
@@ -317,6 +322,10 @@ private:
   {
     status_batt_v_ = msg->battery_voltage;
   }
+  void fwCmdPositionCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    copy3(msg, fw_cmd_xyz_);
+  }
   void voltageCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
   {
     if (!msg->values.empty()) {
@@ -340,6 +349,7 @@ private:
 
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_pose_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Position>::SharedPtr sub_cmd_position_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_fw_cmd_position_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Status>::SharedPtr sub_status_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_motor_thrust_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_motor_pwm_;
@@ -372,6 +382,7 @@ private:
   std::array<double, 3> pose_xyz_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> pose_rpy_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 4> cmd_xyzyaw_ = {qnan_debug(), qnan_debug(), qnan_debug(), qnan_debug()};
+  std::array<double, 3> fw_cmd_xyz_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 4> motor_thrust_ = {qnan_debug(), qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 4> motor_pwm_ = {qnan_debug(), qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> body_force_ = {qnan_debug(), qnan_debug(), qnan_debug()};

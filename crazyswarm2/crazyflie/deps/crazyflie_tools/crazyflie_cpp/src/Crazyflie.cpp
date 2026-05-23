@@ -165,6 +165,18 @@ void Crazyflie::sendPositionSetpoint(
   m_connection.send(req);
 }
 
+void Crazyflie::sendAppChannelPacket(
+  const uint8_t* data,
+  size_t length)
+{
+  const size_t payloadLength = std::min<size_t>(length, 30);
+  bitcraze::crazyflieLinkCpp::Packet packet(13, 2, payloadLength);
+  for (size_t i = 0; i < payloadLength; ++i) {
+    packet.setPayloadAt<uint8_t>(i, data[i]);
+  }
+  m_connection.send(packet);
+}
+
 void Crazyflie::sendHoverSetpoint(
   float vx,
   float vy,

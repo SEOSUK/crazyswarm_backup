@@ -88,22 +88,6 @@ def launch_setup(context, *args, **kwargs):
         )
     )
 
-    if runtime_mode == "debug":
-        actions.append(
-            TimerAction(
-                period=0.3,
-                actions=[
-                    Node(
-                        package="flyingpen_plotter",
-                        executable="data_logging_firmware_debug",
-                        name="data_logging_firmware_debug",
-                        output="screen",
-                        parameters=[runtime_params],
-                    )
-                ],
-            )
-        )
-
     actions.append(
         TimerAction(
             period=0.5,

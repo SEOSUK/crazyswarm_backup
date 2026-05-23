@@ -33,6 +33,8 @@ public:
 
     timer_ = this->create_wall_timer(10ms, std::bind(&RvizVisual::publishTfTimer, this));
 
+    raw_cmd_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/cmd_position_marker", 10);
+    fw_cmd_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/fw_cmd_position_marker", 10);
     raw_force_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/force_raw_marker", 10);
     scaled_force_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/force_scaled_marker", 10);
     acc_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/acc_marker", 10);
@@ -43,6 +45,7 @@ public:
     pos_.setZero();
     rpy_meas_.setZero();
     cmd_pos_.setZero();
+    fw_cmd_pos_.setZero();
     world_force_raw_.setZero();
     world_force_scaled_.setZero();
     world_vel_.setZero();
@@ -54,10 +57,10 @@ public:
 private:
   void dataCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
   {
-    if (msg->data.size() < 49) {
+    if (msg->data.size() < 52) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000,
-        "msg size too small (%zu), expected >= 49", msg->data.size());
+        "msg size too small (%zu), expected >= 52", msg->data.size());
       return;
     }
 
@@ -74,21 +77,25 @@ private:
     cmd_pos_[2] = msg->data[11];
     cmd_yaw_rad_ = msg->data[12];
 
-    world_vel_[0] = msg->data[13];
-    world_vel_[1] = msg->data[14];
-    world_vel_[2] = msg->data[15];
+    fw_cmd_pos_[0] = msg->data[13];
+    fw_cmd_pos_[1] = msg->data[14];
+    fw_cmd_pos_[2] = msg->data[15];
 
-    world_acc_[0] = msg->data[16];
-    world_acc_[1] = msg->data[17];
-    world_acc_[2] = msg->data[18];
+    world_vel_[0] = msg->data[16];
+    world_vel_[1] = msg->data[17];
+    world_vel_[2] = msg->data[18];
 
-    world_force_raw_[0] = msg->data[42];
-    world_force_raw_[1] = msg->data[43];
-    world_force_raw_[2] = msg->data[44];
+    world_acc_[0] = msg->data[19];
+    world_acc_[1] = msg->data[20];
+    world_acc_[2] = msg->data[21];
 
-    world_force_scaled_[0] = msg->data[45];
-    world_force_scaled_[1] = msg->data[46];
-    world_force_scaled_[2] = msg->data[47];
+    world_force_raw_[0] = msg->data[45];
+    world_force_raw_[1] = msg->data[46];
+    world_force_raw_[2] = msg->data[47];
+
+    world_force_scaled_[0] = msg->data[48];
+    world_force_scaled_[1] = msg->data[49];
+    world_force_scaled_[2] = msg->data[50];
   }
 
   void publishTfTimer()
@@ -138,10 +145,33 @@ private:
     tf_cmd.transform.rotation.w = q_cmd.w();
     tf_broadcaster_->sendTransform(tf_cmd);
 
+    geometry_msgs::msg::TransformStamped tf_fw_cmd;
+    tf_fw_cmd.header.stamp = stamp;
+    tf_fw_cmd.header.frame_id = "world";
+    tf_fw_cmd.child_frame_id = "crazyflie_fw_cmd";
+    tf_fw_cmd.transform.translation.x = fw_cmd_pos_[0];
+    tf_fw_cmd.transform.translation.y = fw_cmd_pos_[1];
+    tf_fw_cmd.transform.translation.z = fw_cmd_pos_[2];
+    tf_fw_cmd.transform.rotation = tf_cmd.transform.rotation;
+    tf_broadcaster_->sendTransform(tf_fw_cmd);
+
     geometry_msgs::msg::Point p0;
     p0.x = pos_[0];
     p0.y = pos_[1];
     p0.z = pos_[2];
+
+    geometry_msgs::msg::Point p_cmd;
+    p_cmd.x = cmd_pos_[0];
+    p_cmd.y = cmd_pos_[1];
+    p_cmd.z = cmd_pos_[2];
+
+    geometry_msgs::msg::Point p_fw_cmd;
+    p_fw_cmd.x = fw_cmd_pos_[0];
+    p_fw_cmd.y = fw_cmd_pos_[1];
+    p_fw_cmd.z = fw_cmd_pos_[2];
+
+    publishSphere(raw_cmd_pub_, stamp, "world", "cmd_position", 0, p_cmd, 0.05, 0.0f, 0.45f, 0.90f, 0.85f);
+    publishSphere(fw_cmd_pub_, stamp, "world", "fw_cmd_position", 0, p_fw_cmd, 0.06, 0.90f, 0.35f, 0.10f, 0.90f);
 
     publishArrow(raw_force_pub_, stamp, "world", "force_raw", 0, p0, world_force_raw_, 10.0, 0.02, 0.04, 0.06, 1.0f, 0.2f, 0.2f);
     publishArrow(scaled_force_pub_, stamp, "world", "force_scaled", 0, p0, world_force_scaled_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
@@ -281,6 +311,39 @@ private:
     pub->publish(marker);
   }
 
+  void publishSphere(
+    const rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr& pub,
+    const rclcpp::Time& stamp,
+    const std::string& frame_id,
+    const std::string& ns,
+    int id,
+    const geometry_msgs::msg::Point& center,
+    double scale,
+    float r,
+    float g,
+    float b,
+    float a)
+  {
+    visualization_msgs::msg::Marker marker;
+    marker.header.stamp = stamp;
+    marker.header.frame_id = frame_id;
+    marker.ns = ns;
+    marker.id = id;
+    marker.type = visualization_msgs::msg::Marker::SPHERE;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.pose.position = center;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = scale;
+    marker.scale.y = scale;
+    marker.scale.z = scale;
+    marker.color.r = r;
+    marker.color.g = g;
+    marker.color.b = b;
+    marker.color.a = a;
+    marker.lifetime = rclcpp::Duration(0, 0);
+    pub->publish(marker);
+  }
+
   void publishWall(const rclcpp::Time& stamp)
   {
     visualization_msgs::msg::Marker marker;
@@ -315,6 +378,8 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr raw_cmd_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr fw_cmd_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr raw_force_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr scaled_force_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr acc_pub_;
@@ -325,6 +390,7 @@ private:
   Eigen::Vector3d pos_;
   Eigen::Vector3d rpy_meas_;
   Eigen::Vector3d cmd_pos_;
+  Eigen::Vector3d fw_cmd_pos_;
   double cmd_yaw_rad_{0.0};
   Eigen::Vector3d world_force_raw_;
   Eigen::Vector3d world_force_scaled_;

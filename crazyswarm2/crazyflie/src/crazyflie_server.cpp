@@ -1,7 +1,6 @@
 #include <memory>
 #include <vector>
 #include <regex>
-
 #include <crazyflie_cpp/Crazyflie.h>
 
 #include <rclcpp/rclcpp.hpp>
@@ -23,6 +22,7 @@
 #include "crazyflie_interfaces/msg/full_state.hpp"
 #include "crazyflie_interfaces/msg/hover.hpp"
 #include "crazyflie_interfaces/msg/position.hpp"
+#include "crazyflie_interfaces/msg/position_control.hpp"
 #include "crazyflie_interfaces/msg/status.hpp"
 #include "crazyflie_interfaces/msg/log_data_generic.hpp"
 #include "crazyflie_interfaces/msg/velocity_world.hpp"
@@ -42,6 +42,11 @@ using std_srvs::srv::Empty;
 
 using motion_capture_tracking_interfaces::msg::NamedPoseArray;
 using crazyflie_interfaces::msg::FullState;
+
+namespace {
+constexpr uint8_t kPositionControlTriggerMagic = 0xA5;
+constexpr uint8_t kPositionControlTriggerVersion = 0x01;
+}
 
 #ifdef ROS_DISTRO_HUMBLE
 inline auto get_service_qos() { return rmw_qos_profile_services_default; }
@@ -180,6 +185,7 @@ public:
     subscription_cmd_full_state_ = node->create_subscription<crazyflie_interfaces::msg::FullState>(name + "/cmd_full_state", rclcpp::SystemDefaultsQoS(), std::bind(&CrazyflieROS::cmd_full_state_changed, this, _1), sub_opt_cf_cmd);
     subscription_cmd_hover_ = node->create_subscription<crazyflie_interfaces::msg::Hover>(name + "/cmd_hover", rclcpp::SystemDefaultsQoS(), std::bind(&CrazyflieROS::cmd_hover_changed, this, _1), sub_opt_cf_cmd);
     subscription_cmd_position_ = node->create_subscription<crazyflie_interfaces::msg::Position>(name + "/cmd_position", rclcpp::SystemDefaultsQoS(), std::bind(&CrazyflieROS::cmd_position_changed, this, _1), sub_opt_cf_cmd);
+    subscription_cmd_position_control_ = node->create_subscription<crazyflie_interfaces::msg::PositionControl>(name + "/cmd_position_control", rclcpp::SystemDefaultsQoS(), std::bind(&CrazyflieROS::cmd_position_control_changed, this, _1), sub_opt_cf_cmd);
     subscription_cmd_velocity_world_ = node->create_subscription<crazyflie_interfaces::msg::VelocityWorld>(name + "/cmd_velocity_world", rclcpp::SystemDefaultsQoS(), std::bind(&CrazyflieROS::cmd_velocity_world_changed, this, _1), sub_opt_cf_cmd);
 
     publisher_robot_description_ = node->create_publisher<std_msgs::msg::String>(name + "/robot_description",
@@ -597,7 +603,7 @@ public:
 private:
 
   void cmd_full_state_changed(const crazyflie_interfaces::msg::FullState::SharedPtr msg)
-  { 
+  {
     float x = msg->pose.position.x;
     float y = msg->pose.position.y;
     float z = msg->pose.position.z;
@@ -630,6 +636,26 @@ private:
     float z = msg->z;
     float yaw = msg->yaw;
     cf_.sendPositionSetpoint(x, y, z, yaw);
+  }
+
+  void cmd_position_control_changed(const crazyflie_interfaces::msg::PositionControl::SharedPtr msg)
+  {
+    const uint8_t requested_mode =
+      msg->position_mode == crazyflie_interfaces::msg::PositionControl::MODE_VELOCITY
+        ? crazyflie_interfaces::msg::PositionControl::MODE_VELOCITY
+        : crazyflie_interfaces::msg::PositionControl::MODE_POSITION;
+    const uint8_t requested_trajectory =
+      msg->trajectory_mode <= crazyflie_interfaces::msg::PositionControl::TRAJECTORY_2
+        ? msg->trajectory_mode
+        : crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE;
+
+    const uint8_t payload[] = {
+      kPositionControlTriggerMagic,
+      kPositionControlTriggerVersion,
+      requested_mode,
+      requested_trajectory,
+    };
+    cf_.sendAppChannelPacket(payload, sizeof(payload));
   }
 
   void cmd_hover_changed(const crazyflie_interfaces::msg::Hover::SharedPtr msg)
@@ -998,6 +1024,7 @@ private:
   rclcpp::Subscription<crazyflie_interfaces::msg::FullState>::SharedPtr subscription_cmd_full_state_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Hover>::SharedPtr subscription_cmd_hover_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Position>::SharedPtr subscription_cmd_position_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::PositionControl>::SharedPtr subscription_cmd_position_control_;
   rclcpp::Subscription<crazyflie_interfaces::msg::VelocityWorld>::SharedPtr subscription_cmd_velocity_world_;
 
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher_robot_description_;

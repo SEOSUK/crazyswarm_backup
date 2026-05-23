@@ -64,6 +64,7 @@ ament_target_dependencies(command_publisher
   rclcpp
   std_msgs
   crazyflie_interfaces
+  geometry_msgs
   ament_index_cpp
 )
 

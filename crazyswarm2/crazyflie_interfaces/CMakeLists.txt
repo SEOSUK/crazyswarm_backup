@@ -25,6 +25,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Hover.msg"
   "msg/LogBlock.msg"
   "msg/Position.msg"
+  "msg/PositionControl.msg"
   "msg/Status.msg"
   "msg/TrajectoryPolynomialPiece.msg"
   "msg/VelocityWorld.msg"

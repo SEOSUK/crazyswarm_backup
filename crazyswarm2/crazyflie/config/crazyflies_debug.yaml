@@ -66,6 +66,9 @@ robot_types:
         cf_mob_residual:
           frequency: 20
           vars: [suWrenchObs.fHatRWx, suWrenchObs.fHatRWy, suWrenchObs.fHatRWz]
+        cf_ctrl_target_pos:
+          frequency: 20
+          vars: [ctrltarget.x, ctrltarget.y, ctrltarget.z]
 #         # Desired translational velocity from the position controller.
 
 
@@ -105,6 +108,16 @@ robot_types:
         rOffY: 0.0
         rOffZ: 0.04
         consistencyMode: 2  # 0=None, 1=Residual, 2=Both
+
+      su_position:
+        traj1Shape: 1  # 0=None, 1=Circle, 2=Square
+        traj1SizeX: 0.30  # circle radius or square side length [m]
+        traj1SizeY: 0.30  # circle radius or square side length [m]
+        traj1Period: 6.0  # [s]
+        traj2Shape: 2  # 0=None, 1=Circle, 2=Square
+        traj2SizeX: 0.40  # circle radius or square side length [m]
+        traj2SizeY: 0.40  # circle radius or square side length [m]
+        traj2Period: 8.0  # [s]
 
       kalman:
         resetEstimation: 0

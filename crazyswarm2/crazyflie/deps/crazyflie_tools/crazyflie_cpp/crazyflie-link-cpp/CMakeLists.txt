@@ -49,7 +49,25 @@ if (WIN32)
   set(LIBUSB_INCLUDE_DIR libusb/libusb)
   set(LIBUSB_LIBRARY libusb)
 else()
-  find_package(libusb REQUIRED)
+  find_package(PkgConfig QUIET)
+  if (PkgConfig_FOUND)
+    pkg_check_modules(PC_LIBUSB QUIET libusb-1.0)
+  endif()
+
+  find_path(LIBUSB_INCLUDE_DIR
+    NAMES libusb.h
+    HINTS ${PC_LIBUSB_INCLUDE_DIRS}
+    PATH_SUFFIXES libusb-1.0
+  )
+  find_library(LIBUSB_LIBRARY
+    NAMES usb-1.0 libusb-1.0
+    HINTS ${PC_LIBUSB_LIBRARY_DIRS}
+  )
+
+  include(FindPackageHandleStandardArgs)
+  find_package_handle_standard_args(libusb
+    REQUIRED_VARS LIBUSB_INCLUDE_DIR LIBUSB_LIBRARY
+  )
 endif()
 
 include_directories(

@@ -73,9 +73,10 @@ install(TARGETS motion_capture_tracking_node
   DESTINATION lib/${PROJECT_NAME})
 
 # The precompiled libNatNet library is only available for x64 Linux
-if ((CMAKE_SYSTEM_NAME STREQUAL "Linux") AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64"))
+set(NATNET_LIBRARY_PATH ${CMAKE_CURRENT_SOURCE_DIR}/deps/libmotioncapture/deps/NatNetSDKCrossplatform/lib/ubuntu/libNatNet.so)
+if ((CMAKE_SYSTEM_NAME STREQUAL "Linux") AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64") AND EXISTS ${NATNET_LIBRARY_PATH})
   install(FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deps/libmotioncapture/deps/NatNetSDKCrossplatform/lib/ubuntu/libNatNet.so
+    ${NATNET_LIBRARY_PATH}
     DESTINATION lib/${PROJECT_NAME}
   )
 endif()

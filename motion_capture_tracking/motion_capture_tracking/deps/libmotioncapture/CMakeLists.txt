@@ -30,6 +30,7 @@ find_package(Eigen3 REQUIRED)
 set(VICON_SDK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/vicon-datastream-sdk/)
 set(QUALISYS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/qualisys_cpp_sdk/)
 set(NATNET_SDK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/NatNetSDKCrossplatform/)
+set(NATNET_LIBRARY_PATH ${NATNET_SDK_DIR}/lib/ubuntu/libNatNet.so)
 set(NOKOV_SDK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/nokov_sdk/)
 set(VRPN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/vrpn/)
 set(MOTIONANALYSIS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/cortex_sdk_linux/)
@@ -92,7 +93,7 @@ if (LIBMOTIONCAPTURE_ENABLE_OPTITRACK)
 endif()
 
 if (LIBMOTIONCAPTURE_ENABLE_OPTITRACK_CLOSED_SOURCE)
-  if ((CMAKE_SYSTEM_NAME STREQUAL "Linux") AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64"))
+  if ((CMAKE_SYSTEM_NAME STREQUAL "Linux") AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64") AND EXISTS ${NATNET_LIBRARY_PATH})
     message("Including optitrack_closed_source")
 
     add_definitions(-DENABLE_OPTITRACK_CLOSED_SOURCE)
@@ -114,7 +115,7 @@ if (LIBMOTIONCAPTURE_ENABLE_OPTITRACK_CLOSED_SOURCE)
       NatNet
     )
   else()
-    message(WARNING "Can not include optitrack_closed_source due to missing SDK. (${CMAKE_SYSTEM_NAME}, ${CMAKE_SYSTEM_PROCESSOR})")
+    message(WARNING "Can not include optitrack_closed_source due to missing SDK library: ${NATNET_LIBRARY_PATH} (${CMAKE_SYSTEM_NAME}, ${CMAKE_SYSTEM_PROCESSOR})")
   endif()
 endif()
 
@@ -263,4 +264,3 @@ if (LIBMOTIONCAPTURE_BUILD_EXAMPLE)
   )
 
 endif()
-

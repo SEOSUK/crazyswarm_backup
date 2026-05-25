@@ -154,13 +154,24 @@ mob_force_residual_norm = vecnorm(mob_force_residual, 2, 2);
 mob_torque_norm = vecnorm(mob_torque, 2, 2);
 mob_residual_norm = vecnorm(mob_residual, 2, 2);
 
-acc_from_raw_rpy = nan(size(acc_raw_body));
-acc_from_raw_rpy(:,1) = atan2(acc_raw_body(:,2), acc_raw_body(:,3));
-acc_from_raw_rpy(:,2) = atan2(-acc_raw_body(:,1), sqrt(acc_raw_body(:,2).^2 + acc_raw_body(:,3).^2));
+panelm1_acc_lpf_hz = [0.01];          % e.g. 8.0, [] or <=0 disables LPF
+acc_raw_body_for_recon = local_lowpass_first_order(acc_raw_body, sample_hz, panelm1_acc_lpf_hz);
+
+acc_from_raw_rpy = nan(size(acc_raw_body_for_recon));
+acc_from_raw_rpy(:,1) = atan2(acc_raw_body_for_recon(:,2), acc_raw_body_for_recon(:,3));
+acc_from_raw_rpy(:,2) = atan2(-acc_raw_body_for_recon(:,1), sqrt(acc_raw_body_for_recon(:,2).^2 + acc_raw_body_for_recon(:,3).^2));
 acc_from_raw_rpy(:,3) = nan(size(time));
 
-gyro_integrated_rpy = local_integrate_body_rates_to_rpy_deg(gyro_body, time, pose_rpy(1,:));
+panelm1_gyro_lpf_hz = [0.01];         % e.g. 8.0, [] or <=0 disables LPF
+gyro_body_for_recon = local_lowpass_first_order(gyro_body, sample_hz, panelm1_gyro_lpf_hz);
+gyro_integrated_rpy = local_integrate_body_rates_to_rpy_deg(gyro_body_for_recon, time, pose_rpy(1,:));
 gyro_integrated_rpy(:,3) = unwrap(gyro_integrated_rpy(:,3));
+
+acc_normal_world = local_rpy_to_world_normal(acc_from_raw_rpy);
+gyro_normal_world = local_rpy_to_world_normal(gyro_integrated_rpy);
+pose_normal_world = local_rpy_to_world_normal(pose_rpy);
+acc_normal_tilt_err = local_angle_between_unit_vectors(acc_normal_world, pose_normal_world);
+gyro_normal_tilt_err = local_angle_between_unit_vectors(gyro_normal_world, pose_normal_world);
 
 hover_mask = isfinite(sum_thrust) & sum_thrust > 0.6 * mg_total & sum_thrust < 1.4 * mg_total;
 if nnz(hover_mask) < 10
@@ -191,7 +202,7 @@ acc_color = [0.2 0.6 0.2];
 pos_color = [0.4940 0.1840 0.5560];
 
 %% 5.5) Figure -1: accel/gyro inputs and offline attitude reconstruction
-panelm1_xlim = [25 52];                % e.g. [0 10]
+panelm1_xlim = [25 300];                % e.g. [0 10]
 panelm1_acc_ylim = [];            % fallback for all raw-acc subplots
 panelm1_gyro_ylim = [];           % fallback for all raw-gyro subplots
 panelm1_rpy_ylim = [];            % fallback for all attitude subplots
@@ -208,16 +219,21 @@ panelm1_rpy_z_ylim = [-0.1 0.1];          % e.g. [-3.14 3.14]
 panelm1_acc_axis_ylims = {panelm1_acc_x_ylim, panelm1_acc_y_ylim, panelm1_acc_z_ylim};
 panelm1_gyro_axis_ylims = {panelm1_gyro_x_ylim, panelm1_gyro_y_ylim, panelm1_gyro_z_ylim};
 panelm1_rpy_axis_ylims = {panelm1_rpy_x_ylim, panelm1_rpy_y_ylim, panelm1_rpy_z_ylim};
-
 fminus1 = figure('Name', 'Debug Acc/Gyro Inputs and Offline Attitude', 'NumberTitle', 'off', 'Color', 'w');
 tiledlayout(fminus1, 3, 5, 'TileSpacing', 'compact', 'Padding', 'compact');
 for i = 1:3
     nexttile(5 * (i - 1) + 1);
-    plot(time, acc_raw_body(:,i), 'LineWidth', 1.2, 'Color', cmd_color);
+    plot(time, acc_raw_body(:,i), '--', 'LineWidth', 0.9, 'Color', [0.6 0.6 0.6]); hold on;
+    plot(time, acc_raw_body_for_recon(:,i), 'LineWidth', 1.2, 'Color', cmd_color);
     grid on;
     xlabel('time [s]');
     ylabel(sprintf('%s [G]', axis_names{i}));
-    title(sprintf('Raw accel %s', axis_names{i}));
+    title(sprintf('Accel %s (raw / LPF)', axis_names{i}));
+    if ~isempty(panelm1_acc_lpf_hz) && isfinite(panelm1_acc_lpf_hz) && panelm1_acc_lpf_hz > 0
+        legend({'raw', sprintf('LPF %.2f Hz', panelm1_acc_lpf_hz)}, 'Location', 'best');
+    else
+        legend({'raw', 'LPF off'}, 'Location', 'best');
+    end
     if ~isempty(panelm1_xlim)
         xlim(panelm1_xlim);
     elseif ~isempty(summary_xlim)
@@ -230,11 +246,17 @@ for i = 1:3
     end
 
     nexttile(5 * (i - 1) + 2);
-    plot(time, gyro_body(:,i), 'LineWidth', 1.2, 'Color', [0.1 0.6 0.1]);
+    plot(time, gyro_body(:,i), '--', 'LineWidth', 0.9, 'Color', [0.6 0.6 0.6]); hold on;
+    plot(time, gyro_body_for_recon(:,i), 'LineWidth', 1.2, 'Color', [0.1 0.6 0.1]);
     grid on;
     xlabel('time [s]');
     ylabel(sprintf('%s [deg/s]', axis_names{i}));
-    title(sprintf('Raw gyro %s', axis_names{i}));
+    title(sprintf('Gyro %s (raw / LPF)', axis_names{i}));
+    if ~isempty(panelm1_gyro_lpf_hz) && isfinite(panelm1_gyro_lpf_hz) && panelm1_gyro_lpf_hz > 0
+        legend({'raw', sprintf('LPF %.2f Hz', panelm1_gyro_lpf_hz)}, 'Location', 'best');
+    else
+        legend({'raw', 'LPF off'}, 'Location', 'best');
+    end
     if ~isempty(panelm1_xlim)
         xlim(panelm1_xlim);
     elseif ~isempty(summary_xlim)
@@ -313,8 +335,89 @@ for i = 1:3
     end
 end
 
+%% 5.6) Figure -0.5: normal estimation compare
+panelm05_xlim = panelm1_xlim;         % reuse accel/gyro time window
+panelm05_normal_ylim = [];            % fallback for all world-normal subplots
+panelm05_normal_x_ylim = [];          % e.g. [-0.5 0.5]
+panelm05_normal_y_ylim = [];          % e.g. [-0.5 0.5]
+panelm05_normal_z_ylim = [];          % e.g. [0.5 1.1]
+panelm05_normal_tilt_ylim = [];       % e.g. [0 20]
+panelm05_normal_axis_ylims = {panelm05_normal_x_ylim, panelm05_normal_y_ylim, panelm05_normal_z_ylim};
+
+fm05 = figure('Name', 'Debug Normal Estimation', 'NumberTitle', 'off', 'Color', 'w');
+tiledlayout(fm05, 2, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
+for i = 1:3
+    nexttile(i);
+    plot(time, pose_normal_world(:,i), 'LineWidth', 1.2, 'Color', pos_color); hold on;
+    plot(time, acc_normal_world(:,i), '--', 'LineWidth', 1.1, 'Color', meas_color);
+    plot(time, gyro_normal_world(:,i), ':', 'LineWidth', 1.3, 'Color', [0.1 0.6 0.1]);
+    grid on;
+    xlabel('time [s]');
+    ylabel(sprintf('n_%s [-]', lower(axis_names{i})));
+    title(sprintf('World normal %s', axis_names{i}));
+    legend({'computed attitude', 'acc only', 'gyro int'}, 'Location', 'best');
+    if ~isempty(panelm05_xlim)
+        xlim(panelm05_xlim);
+    elseif ~isempty(summary_xlim)
+        xlim(summary_xlim);
+    end
+    if ~isempty(panelm05_normal_axis_ylims{i})
+        ylim(panelm05_normal_axis_ylims{i});
+    elseif ~isempty(panelm05_normal_ylim)
+        ylim(panelm05_normal_ylim);
+    end
+end
+
+nexttile(4);
+plot(time, acc_normal_tilt_err, '--', 'LineWidth', 1.1, 'Color', meas_color); hold on;
+plot(time, gyro_normal_tilt_err, ':', 'LineWidth', 1.3, 'Color', [0.1 0.6 0.1]);
+grid on;
+xlabel('time [s]');
+ylabel('[deg]');
+title('Normal tilt error vs computed');
+legend({'acc only', 'gyro int'}, 'Location', 'best');
+if ~isempty(panelm05_xlim)
+    xlim(panelm05_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(summary_xlim);
+end
+if ~isempty(panelm05_normal_tilt_ylim)
+    ylim(panelm05_normal_tilt_ylim);
+end
+
+nexttile(5);
+plot(time, vecnorm(acc_normal_world, 2, 2), '--', 'LineWidth', 1.1, 'Color', meas_color); hold on;
+plot(time, vecnorm(gyro_normal_world, 2, 2), ':', 'LineWidth', 1.3, 'Color', [0.1 0.6 0.1]);
+plot(time, vecnorm(pose_normal_world, 2, 2), 'LineWidth', 1.2, 'Color', pos_color);
+grid on;
+xlabel('time [s]');
+ylabel('norm [-]');
+title('Normal vector norm');
+legend({'acc only', 'gyro int', 'computed attitude'}, 'Location', 'best');
+if ~isempty(panelm05_xlim)
+    xlim(panelm05_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(summary_xlim);
+end
+ylim([0.95 1.05]);
+
+nexttile(6);
+plot(time, acc_normal_world(:,3), '--', 'LineWidth', 1.1, 'Color', meas_color); hold on;
+plot(time, gyro_normal_world(:,3), ':', 'LineWidth', 1.3, 'Color', [0.1 0.6 0.1]);
+plot(time, pose_normal_world(:,3), 'LineWidth', 1.2, 'Color', pos_color);
+grid on;
+xlabel('time [s]');
+ylabel('n_z [-]');
+title('Normal Z focus');
+legend({'acc only', 'gyro int', 'computed attitude'}, 'Location', 'best');
+if ~isempty(panelm05_xlim)
+    xlim(panelm05_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(summary_xlim);
+end
+
 %% 6) Figure 0.5: top pose / command position / attitude compare panel
-panel05_xlim = [20 65];               % e.g. [0 10]
+panel05_xlim = [20 300];               % e.g. [0 10]
 panel05_pos_ylim = [];           % fallback for all position subplots
 panel05_vel_ylim = [];           % fallback for all velocity subplots
 panel05_att_ylim = [];           % fallback for all attitude subplots
@@ -397,11 +500,11 @@ for i = 1:3
 end
 
 %% 7) Figure 1: MOB force compare / torque panel
-panel1_xlim = [10 200];                % e.g. [0 10]
+panel1_xlim = [30 70];                % e.g. [0 10]
 panel1_force_ylim = [];          % fallback for all MOB force subplots
 panel1_torque_ylim = [];         % fallback for all MOB torque subplots
-panel1_force_x_ylim = [-0.03 0.03];
-panel1_force_y_ylim = [-0.03 0.03];
+panel1_force_x_ylim = [-0.1 0.1];
+panel1_force_y_ylim = [-0.1 0.1];
 panel1_force_z_ylim = [];
 panel1_torque_x_ylim = [];
 panel1_torque_y_ylim = [];
@@ -634,4 +737,51 @@ function y = local_lowpass_first_order(x, sample_hz, cutoff_hz)
             end
         end
     end
+end
+
+function normal_world = local_rpy_to_world_normal(rpy)
+    n = size(rpy, 1);
+    normal_world = nan(n, 3);
+    for k = 1:n
+        if any(~isfinite(rpy(k, 1:2)))
+            continue;
+        end
+
+        roll = rpy(k, 1);
+        pitch = rpy(k, 2);
+        yaw = 0.0;
+        if size(rpy, 2) >= 3 && isfinite(rpy(k, 3))
+            yaw = rpy(k, 3);
+        end
+
+        R = local_rpy_to_rotmat([roll, pitch, yaw]);
+        normal_world(k, :) = R(:, 3).';
+    end
+end
+
+function R = local_rpy_to_rotmat(rpy)
+    roll = rpy(1);
+    pitch = rpy(2);
+    yaw = rpy(3);
+
+    cr = cos(roll); sr = sin(roll);
+    cp = cos(pitch); sp = sin(pitch);
+    cy = cos(yaw); sy = sin(yaw);
+
+    R = [ ...
+        cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr; ...
+        sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr; ...
+        -sp,     cp * sr,                cp * cr];
+end
+
+function ang_deg = local_angle_between_unit_vectors(a, b)
+    dot_ab = sum(a .* b, 2, 'omitnan');
+    norm_a = vecnorm(a, 2, 2);
+    norm_b = vecnorm(b, 2, 2);
+    denom = norm_a .* norm_b;
+    cos_theta = nan(size(dot_ab));
+    valid = denom > 0 & isfinite(denom);
+    cos_theta(valid) = dot_ab(valid) ./ denom(valid);
+    cos_theta = max(min(cos_theta, 1), -1);
+    ang_deg = rad2deg(acos(cos_theta));
 end

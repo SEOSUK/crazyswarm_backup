@@ -82,7 +82,7 @@ robot_types:
         extPosStdDev: 1e-3
         extQuatStdDev: 0.5e-1
       imu_sensors:
-        accTrimRoll: -0.5
+        accTrimRoll: -0.8
         accTrimPitch: -0.4
         accBiasX: 0.0
         accBiasY: 0.0

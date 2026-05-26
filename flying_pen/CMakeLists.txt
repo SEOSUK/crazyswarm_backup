@@ -68,19 +68,10 @@ ament_target_dependencies(command_publisher
   ament_index_cpp
 )
 
-add_executable(command_velocity_publisher src/command_velocity_publisher.cpp)
-ament_target_dependencies(command_velocity_publisher
-  rclcpp
-  std_msgs
-  crazyflie_interfaces
-  ament_index_cpp
-)
-
 # Eigen3은 ament dependency가 아니라 include 디렉토리로 직접 추가
 target_include_directories(data_logging PRIVATE ${EIGEN3_INCLUDE_DIRS})
 target_include_directories(rviz_visual PRIVATE ${EIGEN3_INCLUDE_DIRS})
 target_link_libraries(command_publisher ncurses)
-target_link_libraries(command_velocity_publisher ncurses)
 
 # 설치 (ros2 run 할 수 있게)
 install(TARGETS
@@ -89,7 +80,6 @@ install(TARGETS
   data_player
   rviz_visual
   command_publisher
-  command_velocity_publisher
   DESTINATION lib/${PROJECT_NAME}
 )
 

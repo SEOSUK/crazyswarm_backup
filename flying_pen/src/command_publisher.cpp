@@ -7,7 +7,6 @@
 #include <crazyflie_interfaces/msg/position_control.hpp>
 #include <crazyflie_interfaces/msg/status.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
-#include <std_msgs/msg/float32.hpp>
 #include <std_msgs/msg/string.hpp>
 
 #include <ncurses.h>
@@ -45,9 +44,6 @@ public:
     key_pub_ = this->create_publisher<std_msgs::msg::String>(
       "keyboard_input", 10);
 
-    force_pub_ = this->create_publisher<std_msgs::msg::Float32>(
-      "su/cmd_force", 10);
-
     status_sub_ = this->create_subscription<crazyflie_interfaces::msg::Status>(
       "cf2/status", 10,
       std::bind(&CommandPublisher::statusCallback, this, std::placeholders::_1));
@@ -75,8 +71,7 @@ public:
     end_effector_offset_ = declareVector3Parameter("end_effector_offset", loadSharedEndEffectorOffsetDefault());
 
     trajectory_label_none_ = this->declare_parameter<std::string>("trajectory_none_label", "none");
-    trajectory_label_1_ = this->declare_parameter<std::string>("trajectory_1_label", "trajectory_1");
-    trajectory_label_2_ = this->declare_parameter<std::string>("trajectory_2_label", "trajectory_2");
+    trajectory_label_1_ = this->declare_parameter<std::string>("trajectory_1_label", "trajectory_run");
 
     cmd_xyz_yaw_.fill(0.0);
     force_des_ = 0.0;
@@ -280,12 +275,11 @@ private:
     else if (c == 'u')  { setPositionMode(crazyflie_interfaces::msg::PositionControl::MODE_POSITION); }
     else if (c == 'f')  { setCommandReference(crazyflie_interfaces::msg::PositionControl::REFERENCE_DRONE); }
     else if (c == 'g')  { setCommandReference(crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR); }
-    else if (c == 'b')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE); }
-    else if (c == 'n')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_1); }
-    else if (c == 'm')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_2); }
-    else if (c == 'j')  { force_des_ += force_delta_; publishForce(); pushInputHistory("j : force += tick"); }
-    else if (c == 'k')  { force_des_ -= force_delta_; publishForce(); pushInputHistory("k : force -= tick"); }
-    else if (c == 'l')  { force_des_ = 0.0; publishForce(); pushInputHistory("l : force reset"); }
+    else if (c == 'n')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE); }
+    else if (c == 'm')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_1); }
+    else if (c == 'j')  { force_des_ += force_delta_; publishPositionControl(); updateForceStatus(); pushInputHistory("j : force += tick"); }
+    else if (c == 'k')  { force_des_ -= force_delta_; publishPositionControl(); updateForceStatus(); pushInputHistory("k : force -= tick"); }
+    else if (c == 'l')  { force_des_ = 0.0; publishPositionControl(); updateForceStatus(); pushInputHistory("l : force reset"); }
     else if (c == 'r')  { triggerMobBiasZero(); pushInputHistory("r : zero MOB bias"); }
     else if (c == 'o' || c == 'p') {
       publishKeyboardTrigger(c);
@@ -386,12 +380,17 @@ private:
       return;
     }
 
+    const bool trajectory_was_active =
+      current_trajectory_mode_ != crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE;
+
     if (mode == crazyflie_interfaces::msg::PositionControl::MODE_VELOCITY) {
       cmd_xyz_yaw_[0] = 0.0;
       cmd_xyz_yaw_[1] = 0.0;
       cmd_xyz_yaw_[2] = 0.0;
       velocity_mode_command_ready_time_ = std::chrono::steady_clock::now() + kVelocityModeHandoffDelay;
-      status_msg_ = "entered VELOCITY mode, current position reference preserved in firmware";
+      status_msg_ = trajectory_was_active ?
+        "entered VELOCITY mode, trajectory stopped" :
+        "entered VELOCITY mode, current position reference preserved in firmware";
       pushInputHistory("i : enter velocity mode");
     } else {
       velocity_mode_command_ready_time_ = std::chrono::steady_clock::time_point{};
@@ -417,10 +416,14 @@ private:
         cmd_xyz_yaw_[2] = 0.0;
         status_msg_ = "entered POSITION mode, pose unavailable so command reset";
       }
+      if (trajectory_was_active) {
+        status_msg_ = "entered POSITION mode, trajectory stopped";
+      }
       pushInputHistory("u : enter position mode");
     }
 
     current_mode_ = mode;
+    current_trajectory_mode_ = crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE;
     publishPositionControl();
   }
 
@@ -460,14 +463,14 @@ private:
     publishPositionControl();
 
     if (trajectoryMode == crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE) {
-      status_msg_ = "trajectory disabled";
-      pushInputHistory("b : trajectory off");
+      status_msg_ = "trajectory stopped";
+      pushInputHistory("n : trajectory stop");
     } else if (trajectoryMode == crazyflie_interfaces::msg::PositionControl::TRAJECTORY_1) {
-      status_msg_ = "trajectory 1 selected";
-      pushInputHistory("n : trajectory 1");
+      status_msg_ = "trajectory running";
+      pushInputHistory("m : trajectory run");
     } else {
-      status_msg_ = "trajectory 2 selected";
-      pushInputHistory("m : trajectory 2");
+      status_msg_ = "trajectory running";
+      pushInputHistory("trajectory run");
     }
   }
 
@@ -584,22 +587,14 @@ private:
     msg.position_mode = current_mode_;
     msg.command_reference = current_command_reference_;
     msg.trajectory_mode = current_trajectory_mode_;
+    msg.force_desired = static_cast<float>(force_des_);
     position_control_pub_->publish(msg);
   }
 
-  void publishForce()
+  void updateForceStatus()
   {
-    if (!force_pub_) {
-      status_msg_ = "force_pub not ready";
-      return;
-    }
-
-    std_msgs::msg::Float32 msg;
-    msg.data = static_cast<float>(force_des_);
-    force_pub_->publish(msg);
-
     char buf[128];
-    snprintf(buf, sizeof(buf), "set cmd_fx = %.3f (via su_interface)", force_des_);
+    snprintf(buf, sizeof(buf), "set force_desired = %.3f (via PositionControl)", force_des_);
     status_msg_ = buf;
   }
 
@@ -768,9 +763,6 @@ private:
     if (mode == crazyflie_interfaces::msg::PositionControl::TRAJECTORY_1) {
       return trajectory_label_1_;
     }
-    if (mode == crazyflie_interfaces::msg::PositionControl::TRAJECTORY_2) {
-      return trajectory_label_2_;
-    }
     return trajectory_label_none_;
   }
 
@@ -787,7 +779,7 @@ private:
 
     drawSepLine(ROW_USAGE_HEADER, "usage");
     mvprintw(ROW_USAGE_1, 0, "position: w/s(x), a/d(y), e/q(z), z/c(yaw), x(hold/reset), i->velocity, f/g(ref)");
-    mvprintw(ROW_USAGE_2, 0, "velocity: w/s/a/d/e/q(v), x(zero vel), u->position, b(off), n(traj1), m(traj2), f/g(ref)");
+    mvprintw(ROW_USAGE_2, 0, "velocity: w/s/a/d/e/q(v), x(zero vel), u->position, n(stop), m(run), f/g(ref)");
     mvprintw(ROW_USAGE_3, 0, "force/bias: j/k/l (cmd_fx), r(zero bias), o/p arm/disarm, t quit");
 
     drawSepLine(ROW_STATUS_HEADER, "status");
@@ -824,11 +816,10 @@ private:
     move(ROW_STATUS_TRAJ, 0);
     clrtoeol();
     printw(
-      "trajectory: active=%s, b=%s, n=%s, m=%s",
+      "trajectory: active=%s, n=%s, m=%s",
       trajectoryLabel(current_trajectory_mode_).c_str(),
       trajectory_label_none_.c_str(),
-      trajectory_label_1_.c_str(),
-      trajectory_label_2_.c_str());
+      trajectory_label_1_.c_str());
 
     move(ROW_STATUS_FORCE, 0);
     clrtoeol();
@@ -909,7 +900,6 @@ private:
   rclcpp::Publisher<crazyflie_interfaces::msg::Position>::SharedPtr cf_position_pub_;
   rclcpp::Publisher<crazyflie_interfaces::msg::PositionControl>::SharedPtr position_control_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr key_pub_;
-  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr force_pub_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Status>::SharedPtr status_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr fw_cmd_sub_;
@@ -939,7 +929,6 @@ private:
   std::string command_frame_;
   std::string trajectory_label_none_;
   std::string trajectory_label_1_;
-  std::string trajectory_label_2_;
   std::string status_msg_;
   std::string zero_bias_last_result_;
   std::chrono::steady_clock::time_point last_battery_display_update_;

@@ -7,6 +7,7 @@
 
 #include <crazyflie_interfaces/msg/log_data_generic.hpp>
 #include <crazyflie_interfaces/msg/position.hpp>
+#include <crazyflie_interfaces/msg/position_control.hpp>
 #include <crazyflie_interfaces/msg/status.hpp>
 
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -77,11 +78,13 @@ public:
   // 47     : zero_bias_count
   // 48..50 : mob_force_none xyz [N]
   // 51..53 : mob_force_residual xyz [N]
-  // 54..56 : mob_torque xyz [N*m]
-  // 57..59 : mob_residual xyz [N*m]
-  // 60..62 : body-frame accel xyz [G], after manual bias correction and before gravity-trim/LPF
-  // 63..65 : body-frame gyro xyz [deg/s], Mahony/complementary gyro input
-  static constexpr int kDataLen = 66;
+  // 54..56 : mob_force_final xyz [N]
+  // 57..59 : mob_torque xyz [N*m]
+  // 60..62 : mob_residual xyz [N*m]
+  // 63..65 : body-frame accel xyz [G], after manual bias correction and before gravity-trim/LPF
+  // 66..68 : body-frame gyro xyz [deg/s], Mahony/complementary gyro input
+  // 69     : force_desired [N], scalar preload force command from PositionControl
+  static constexpr int kDataLen = 70;
 
   DataLoggingDebugNode()
   : Node("data_logging_debug")
@@ -108,6 +111,8 @@ public:
       cf_ns_ + "/pose", 10, std::bind(&DataLoggingDebugNode::poseCallback, this, _1));
     sub_cmd_position_ = this->create_subscription<crazyflie_interfaces::msg::Position>(
       cf_ns_ + "/cmd_position", 10, std::bind(&DataLoggingDebugNode::cmdPositionCallback, this, _1));
+    sub_cmd_position_control_ = this->create_subscription<crazyflie_interfaces::msg::PositionControl>(
+      cf_ns_ + "/cmd_position_control", 10, std::bind(&DataLoggingDebugNode::cmdPositionControlCallback, this, _1));
     sub_fw_cmd_position_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_ctrl_target_pos", 10, std::bind(&DataLoggingDebugNode::fwCmdPositionCallback, this, _1));
     sub_status_ = this->create_subscription<crazyflie_interfaces::msg::Status>(
@@ -144,6 +149,8 @@ public:
       cf_ns_ + "/cf_mob_pure", 10, std::bind(&DataLoggingDebugNode::mobPureCallback, this, _1));
     sub_mob_residual_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_mob_residual", 10, std::bind(&DataLoggingDebugNode::mobResidualCallback, this, _1));
+    sub_mob_final_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_mob_final", 10, std::bind(&DataLoggingDebugNode::mobFinalCallback, this, _1));
 
     RCLCPP_INFO(get_logger(), "data_logging_debug node started");
   }
@@ -182,10 +189,12 @@ public:
     out.data.push_back(zero_bias_count_);
     push3(out, mob_force_none_);
     push3(out, mob_force_residual_);
+    push3(out, mob_force_final_);
     push3(out, mob_torque_);
     push3(out, mob_residual_);
     push3(out, acc_raw_body_);
     push3(out, gyro_raw_body_);
+    out.data.push_back(force_desired_);
 
     if (out.data.size() != static_cast<size_t>(kDataLen)) {
       out.data.resize(kDataLen, qnan_debug());
@@ -250,10 +259,12 @@ private:
       << "zero_bias_count,"
       << "mobForceNone_x,mobForceNone_y,mobForceNone_z,"
       << "mobForceResidual_x,mobForceResidual_y,mobForceResidual_z,"
+      << "mobForceFinal_x,mobForceFinal_y,mobForceFinal_z,"
       << "mobTorque_x,mobTorque_y,mobTorque_z,"
       << "mobResidual_x,mobResidual_y,mobResidual_z,"
       << "accRawBody_x,accRawBody_y,accRawBody_z,"
-      << "gyroBody_x,gyroBody_y,gyroBody_z\n";
+      << "gyroBody_x,gyroBody_y,gyroBody_z,"
+      << "forceDesired\n";
     csv_.flush();
   }
 
@@ -314,6 +325,10 @@ private:
     cmd_xyzyaw_[2] = msg->z;
     cmd_xyzyaw_[3] = msg->yaw;
   }
+  void cmdPositionControlCallback(const crazyflie_interfaces::msg::PositionControl::SharedPtr msg)
+  {
+    force_desired_ = msg->force_desired;
+  }
   void statusCallback(const crazyflie_interfaces::msg::Status::SharedPtr msg)
   {
     status_batt_v_ = msg->battery_voltage;
@@ -353,10 +368,16 @@ private:
     copy3(msg, mob_force_residual_);
   }
 
+  void mobFinalCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    copy3(msg, mob_force_final_);
+  }
+
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr data_pub_;
 
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_pose_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Position>::SharedPtr sub_cmd_position_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::PositionControl>::SharedPtr sub_cmd_position_control_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_fw_cmd_position_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Status>::SharedPtr sub_status_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_motor_thrust_;
@@ -375,6 +396,7 @@ private:
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_debug_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_pure_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_residual_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_final_;
 
   std::string csv_dir_;
   std::string csv_path_;
@@ -406,8 +428,10 @@ private:
   double zero_bias_count_ = qnan_debug();
   std::array<double, 3> mob_force_none_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> mob_force_residual_ = {qnan_debug(), qnan_debug(), qnan_debug()};
+  std::array<double, 3> mob_force_final_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> mob_torque_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> mob_residual_ = {qnan_debug(), qnan_debug(), qnan_debug()};
+  double force_desired_ = qnan_debug();
 };
 
 int main(int argc, char * argv[])

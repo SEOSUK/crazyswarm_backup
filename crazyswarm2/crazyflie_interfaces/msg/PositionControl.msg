@@ -13,3 +13,4 @@ uint8 TRAJECTORY_2=2
 uint8 position_mode
 uint8 command_reference
 uint8 trajectory_mode
+float32 force_desired

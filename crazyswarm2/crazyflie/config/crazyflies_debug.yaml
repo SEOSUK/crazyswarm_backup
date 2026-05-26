@@ -66,6 +66,9 @@ robot_types:
         cf_mob_residual:
           frequency: 20
           vars: [suWrenchObs.fHatRWx, suWrenchObs.fHatRWy, suWrenchObs.fHatRWz]
+        cf_mob_final:
+          frequency: 20
+          vars: [suWrenchObs.fHatWx, suWrenchObs.fHatWy, suWrenchObs.fHatWz]
         cf_ctrl_target_pos:
           frequency: 20
           vars: [ctrltarget.x, ctrltarget.y, ctrltarget.z]
@@ -167,8 +170,8 @@ robot_types:
         roll_kff: 0.0 # Default: 0.0
         pitch_kff: 0.0 # Default: 0.0
         yaw_kff: 0.0 # Default: 0.0
-        attFiltEn: 0 # Default: 0, attitude PID D-term LPF enable
-        attFiltCut: 15.0 # Default: 15.0 Hz, attitude PID D-term LPF cutoff
+        attFiltEn: 1 # Default: 0, attitude PID D-term LPF enable
+        attFiltCut: 60.0 # Default: 15.0 Hz, attitude PID D-term LPF cutoff
       pid_rate:
         roll_kp: 220.0 # Default: 200.0
         pitch_kp: 250.0 # Default: 200.0
@@ -182,10 +185,10 @@ robot_types:
         roll_kff: 0.0 # Default: 0.0
         pitch_kff: 0.0 # Default: 0.0
         yaw_kff: 0.0 # Default: 0.0
-        rateFiltEn: 0 # Default: 0, rate PID D-term LPF enable
-        omxFiltCut: 30.0 # Default: 30.0 Hz, roll-rate PID D-term LPF cutoff
-        omyFiltCut: 30.0 # Default: 30.0 Hz, pitch-rate PID D-term LPF cutoff
-        omzFiltCut: 30.0 # Default: 30.0 Hz, yaw-rate PID D-term LPF cutoff
+        rateFiltEn: 1 # Default: 0, rate PID D-term LPF enable
+        omxFiltCut: 60.0 # Default: 30.0 Hz, roll-rate PID D-term LPF cutoff
+        omyFiltCut: 60.0 # Default: 30.0 Hz, pitch-rate PID D-term LPF cutoff
+        omzFiltCut: 60.0 # Default: 30.0 Hz, yaw-rate PID D-term LPF cutoff
 
     broadcasts:
       num_repeats: 1 # number of times broadcast commands are repeated

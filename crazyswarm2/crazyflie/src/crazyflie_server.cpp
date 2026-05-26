@@ -45,7 +45,7 @@ using crazyflie_interfaces::msg::FullState;
 
 namespace {
 constexpr uint8_t kPositionControlTriggerMagic = 0xA5;
-constexpr uint8_t kPositionControlTriggerVersion = 0x01;
+constexpr uint8_t kPositionControlTriggerVersion = 0x02;
 }
 
 #ifdef ROS_DISTRO_HUMBLE
@@ -653,14 +653,22 @@ private:
         ? crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR
         : crazyflie_interfaces::msg::PositionControl::REFERENCE_DRONE;
 
-    const uint8_t payload[] = {
+    const struct __attribute__((packed)) {
+      uint8_t magic;
+      uint8_t version;
+      uint8_t mode;
+      uint8_t trajectory;
+      uint8_t reference;
+      float force_desired;
+    } payload = {
       kPositionControlTriggerMagic,
       kPositionControlTriggerVersion,
       requested_mode,
       requested_trajectory,
       requested_reference,
+      msg->force_desired,
     };
-    cf_.sendAppChannelPacket(payload, sizeof(payload));
+    cf_.sendAppChannelPacket(reinterpret_cast<const uint8_t*>(&payload), sizeof(payload));
   }
 
   void cmd_hover_changed(const crazyflie_interfaces::msg::Hover::SharedPtr msg)

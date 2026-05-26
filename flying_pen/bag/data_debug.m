@@ -19,9 +19,11 @@
 %   status_battery_voltage,pm_vbat,                  [V], host status / firmware pm.vbat
 %   zero_bias_count
 %   mobForceNone_x,y,z, mobForceResidual_x,y,z,        [N], momentum-only / momentum+consistency
+%   mobForceFinal_x,y,z                                 [N], final MOB force used by control after selection/bias compensation
 %   mobTorque_x,y,z, mobResidual_x,y,z                 [N*m], observer torque / consistency residual
 %   accRawBody_x,y,z                                   [G], body-frame accel after manual bias correction, before gravity-trim/LPF
 %   gyroBody_x,y,z                                     [deg/s], body-frame gyro used by Mahony/complementary
+%   forceDesired                                       [N], scalar preload force command from PositionControl
 %
 % Notes:
 % - The debug CSV currently has no timestamp column, so time is reconstructed
@@ -99,10 +101,12 @@ batt_pm = get1("pm_vbat");
 zero_bias_count = get1("zero_bias_count");
 mob_force_none = [get1("mobForceNone_x"), get1("mobForceNone_y"), get1("mobForceNone_z")];
 mob_force_residual = [get1("mobForceResidual_x"), get1("mobForceResidual_y"), get1("mobForceResidual_z")];
+mob_force_final = [get1("mobForceFinal_x"), get1("mobForceFinal_y"), get1("mobForceFinal_z")];
 mob_torque = [get1("mobTorque_x"), get1("mobTorque_y"), get1("mobTorque_z")];
 mob_residual = [get1("mobResidual_x"), get1("mobResidual_y"), get1("mobResidual_z")];
 acc_raw_body = [get1("accRawBody_x"), get1("accRawBody_y"), get1("accRawBody_z")];
 gyro_body = [get1("gyroBody_x"), get1("gyroBody_y"), get1("gyroBody_z")];
+force_desired = get1("forceDesired");
 
 valid = isfinite(time);
 time = time(valid);
@@ -126,10 +130,12 @@ batt_pm = batt_pm(valid);
 zero_bias_count = zero_bias_count(valid);
 mob_force_none = mob_force_none(valid,:);
 mob_force_residual = mob_force_residual(valid,:);
+mob_force_final = mob_force_final(valid,:);
 mob_torque = mob_torque(valid,:);
 mob_residual = mob_residual(valid,:);
 acc_raw_body = acc_raw_body(valid,:);
 gyro_body = gyro_body(valid,:);
+force_desired = force_desired(valid);
 
 N = numel(time);
 fprintf("[INFO] Using %d rows.\n", N);
@@ -151,6 +157,7 @@ world_force_norm = vecnorm(world_force, 2, 2);
 body_torque_norm = vecnorm(body_torque, 2, 2);
 mob_force_none_norm = vecnorm(mob_force_none, 2, 2);
 mob_force_residual_norm = vecnorm(mob_force_residual, 2, 2);
+mob_force_final_norm = vecnorm(mob_force_final, 2, 2);
 mob_torque_norm = vecnorm(mob_torque, 2, 2);
 mob_residual_norm = vecnorm(mob_residual, 2, 2);
 
@@ -172,6 +179,7 @@ gyro_normal_world = local_rpy_to_world_normal(gyro_integrated_rpy);
 pose_normal_world = local_rpy_to_world_normal(pose_rpy);
 acc_normal_tilt_err = local_angle_between_unit_vectors(acc_normal_world, pose_normal_world);
 gyro_normal_tilt_err = local_angle_between_unit_vectors(gyro_normal_world, pose_normal_world);
+force_measured_x_for_control = -mob_force_final(:,1);  % normal = [-1, 0, 0] => f_n = n^T f = -fHatW_x
 
 hover_mask = isfinite(sum_thrust) & sum_thrust > 0.6 * mg_total & sum_thrust < 1.4 * mg_total;
 if nnz(hover_mask) < 10
@@ -202,7 +210,7 @@ acc_color = [0.2 0.6 0.2];
 pos_color = [0.4940 0.1840 0.5560];
 
 %% 5.5) Figure -1: accel/gyro inputs and offline attitude reconstruction
-panelm1_xlim = [25 300];                % e.g. [0 10]
+panelm1_xlim = [25 80];                % e.g. [0 10]
 panelm1_acc_ylim = [];            % fallback for all raw-acc subplots
 panelm1_gyro_ylim = [];           % fallback for all raw-gyro subplots
 panelm1_rpy_ylim = [];            % fallback for all attitude subplots
@@ -417,14 +425,14 @@ elseif ~isempty(summary_xlim)
 end
 
 %% 6) Figure 0.5: top pose / command position / attitude compare panel
-panel05_xlim = [20 300];               % e.g. [0 10]
+panel05_xlim = [10 120];               % e.g. [0 10]
 panel05_pos_ylim = [];           % fallback for all position subplots
 panel05_vel_ylim = [];           % fallback for all velocity subplots
 panel05_att_ylim = [];           % fallback for all attitude subplots
-panel05_pos_x_ylim = [-0.0 1.0];         % e.g. [-1 1]
+panel05_pos_x_ylim = [-0.0 1.5];         % e.g. [-1 1]
 panel05_pos_y_ylim = [-0.3 0.5];         % e.g. [-1 1]
-panel05_pos_z_ylim = [0.4 1.2];         % e.g. [0 1]
-panel05_vel_x_ylim = [-0.3 0.3];         % e.g. [-1 1]
+panel05_pos_z_ylim = [1.0 2.0];         % e.g. [0 1]
+panel05_vel_x_ylim = [-0.3 1.0];         % e.g. [-1 1]
 panel05_vel_y_ylim = [-0.3 0.3];         % e.g. [-1 1]
 panel05_vel_z_ylim = [-0.3 0.3];         % e.g. [-1 1]
 panel05_att_x_ylim = [-0.2 0.2];         % e.g. [-0.5 0.5]
@@ -500,7 +508,7 @@ for i = 1:3
 end
 
 %% 7) Figure 1: MOB force compare / torque panel
-panel1_xlim = [30 70];                % e.g. [0 10]
+panel1_xlim = [10 120];                % e.g. [0 10]
 panel1_force_ylim = [];          % fallback for all MOB force subplots
 panel1_torque_ylim = [];         % fallback for all MOB torque subplots
 panel1_force_x_ylim = [-0.1 0.1];
@@ -602,7 +610,79 @@ ylabel('voltage [V]');
 title('zero\_bias\_count and battery voltage');
 legend({'zero\_bias\_count', 'pm.vbat', 'status.battery\_voltage'}, 'Location', 'best');
 
-%% 10) Figure 5: velocity compare
+%% 10) Figure 4.5: position / MOB force / force command compare
+panel45_xlim = [20 122];
+panel45_pos_ylim = panel05_pos_ylim;
+panel45_pos_x_ylim = panel45_xlim;
+panel45_pos_y_ylim = panel05_pos_y_ylim;
+panel45_pos_z_ylim = panel05_pos_z_ylim;
+panel45_force_ylim = [];
+panel45_force_x_ylim = panel45_xlim;
+panel45_force_y_ylim = panel1_force_y_ylim;
+panel45_force_z_ylim = panel1_force_z_ylim;
+panel45_force_cmd_ylim = [];
+panel45_pos_axis_ylims = {panel45_pos_x_ylim, panel45_pos_y_ylim, panel45_pos_z_ylim};
+panel45_force_axis_ylims = {panel45_force_x_ylim, panel45_force_y_ylim, panel45_force_z_ylim};
+
+f45 = figure('Name', 'Debug Position and Force Control', 'NumberTitle', 'off', 'Color', 'w');
+tiledlayout(f45, 3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+for i = 1:3
+    nexttile(2 * i - 1);
+    plot(time, pose_xyz(:,i), 'LineWidth', 1.2, 'Color', meas_color); hold on;
+    plot(time, fw_cmd_xyz(:,i), '--', 'LineWidth', 1.2, 'Color', cmd_color);
+    grid on;
+    xlabel('time [s]');
+    ylabel(sprintf('%s [m]', axis_names{i}));
+    title(sprintf('Desired vs measured position %s', axis_names{i}));
+    legend({'measured', 'fw final position'}, 'Location', 'best');
+    if ~isempty(panel45_xlim)
+        xlim(panel45_xlim);
+    elseif ~isempty(summary_xlim)
+        xlim(summary_xlim);
+    end
+    if ~isempty(panel45_pos_axis_ylims{i})
+        ylim(panel45_pos_axis_ylims{i});
+    elseif ~isempty(panel45_pos_ylim)
+        ylim(panel45_pos_ylim);
+    end
+end
+
+nexttile(2, [2 1]);
+plot(time, mob_force_final(:,1), 'LineWidth', 1.2, 'Color', cmd_color); hold on;
+plot(time, mob_force_final(:,2), '--', 'LineWidth', 1.2, 'Color', meas_color);
+plot(time, mob_force_final(:,3), ':', 'LineWidth', 1.4, 'Color', [0.2 0.6 0.2]);
+grid on;
+xlabel('time [s]');
+ylabel('[N]');
+title('Momentum observer force used by control (final fHatW)');
+legend({'fHatW_x', 'fHatW_y', 'fHatW_z'}, 'Location', 'best');
+if ~isempty(panel45_xlim)
+    xlim(panel45_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(summary_xlim);
+end
+if ~isempty(panel45_force_ylim)
+    ylim(panel45_force_ylim);
+end
+
+nexttile(6);
+plot(time, force_desired, '--', 'LineWidth', 1.2, 'Color', cmd_color); hold on;
+plot(time, force_measured_x_for_control, 'LineWidth', 1.2, 'Color', meas_color);
+grid on;
+xlabel('time [s]');
+ylabel('[N]');
+title('Force cmd vs measured X for control');
+legend({'force desired', 'measured normal force = -fHatW_x'}, 'Location', 'best');
+if ~isempty(panel45_xlim)
+    xlim(panel45_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(summary_xlim);
+end
+if ~isempty(panel45_force_cmd_ylim)
+    ylim(panel45_force_cmd_ylim);
+end
+
+%% 11) Figure 5: velocity compare
 f5 = figure('Name', 'Debug Velocity', 'NumberTitle', 'off', 'Color', 'w');
 tiledlayout(f5, 2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 for i = 1:3

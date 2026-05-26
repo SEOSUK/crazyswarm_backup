@@ -4,17 +4,5 @@ command_publisher:
     velocity_tick: [0.1, 0.1, 0.1]
     yaw_tick_deg: 2.0
     force_tick: 0.01
-    trajectory_none_label: "off"
-    trajectory_1_label: "circle_yz"
-    trajectory_2_label: "square_yz"
-
-command_velocity_publisher:
-  ros__parameters:
-    cf_namespace: "cf2"
-    interface_type: "hover" # default: "hover", override with --ros-args -p interface_type:=velocity_world
-    dvx: 0.01
-    dvy: 0.01
-    dvz: 0.2
-    dz: 0.01
-    dyaw_rate: 0.2
-    hover_z_distance: 0.6
+    trajectory_none_label: "stop"
+    trajectory_1_label: "run"

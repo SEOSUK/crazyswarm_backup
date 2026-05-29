@@ -24,6 +24,10 @@
 %   accRawBody_x,y,z                                   [G], body-frame accel after manual bias correction, before gravity-trim/LPF
 %   gyroBody_x,y,z                                     [deg/s], body-frame gyro used by Mahony/complementary
 %   forceDesired                                       [N], scalar preload force command from PositionControl
+%   normalPre_x,y,z                                    [-], force-direction evidence before velocity projection
+%   normalPost_x,y,z                                   [-], normal candidate after velocity projection
+%   normalEst_x,y,z                                    [-], firmware normal estimator output in world frame
+%   yawRef_deg                                         [deg], final referenceYawDeg written into setpoint->attitude.yaw
 %
 % Notes:
 % - The debug CSV currently has no timestamp column, so time is reconstructed
@@ -36,7 +40,7 @@ set(groot, 'defaultFigureRenderer', 'painters');
 
 %% 0) User config
 sample_hz = 50.0;      % data_logging_debug loop_hz default
-mass_kg = 0.048;      % Crazyflie 2.1 Brushless mass
+mass_kg = 0.0425;      % Crazyflie 2.1 Brushless mass
 gravity_ms2 = 9.81;
 defaultDir = fullfile(getenv("HOME"), "hitl_ws", "src", "flying_pen", "bag", "logging");
 if ~isfolder(defaultDir), defaultDir = pwd; end
@@ -96,6 +100,7 @@ vel_des = [get1("velDes_vx"), get1("velDes_vy"), get1("velDes_vz")];
 att_des = deg2rad([get1("attDes_roll"), get1("attDes_pitch"), get1("attDes_yaw")]);
 % Crazyflie legacy convention uses the opposite sign for desired pitch.
 att_des(:,2) = -att_des(:,2);
+yaw_ref = deg2rad(get1("yawRef_deg"));
 batt_status = get1("status_battery_voltage");
 batt_pm = get1("pm_vbat");
 zero_bias_count = get1("zero_bias_count");
@@ -106,6 +111,9 @@ mob_torque = [get1("mobTorque_x"), get1("mobTorque_y"), get1("mobTorque_z")];
 mob_residual = [get1("mobResidual_x"), get1("mobResidual_y"), get1("mobResidual_z")];
 acc_raw_body = [get1("accRawBody_x"), get1("accRawBody_y"), get1("accRawBody_z")];
 gyro_body = [get1("gyroBody_x"), get1("gyroBody_y"), get1("gyroBody_z")];
+normal_pre_logged = [get1("normalPre_x"), get1("normalPre_y"), get1("normalPre_z")];
+normal_post_logged = [get1("normalPost_x"), get1("normalPost_y"), get1("normalPost_z")];
+normal_est_logged = [get1("normalEst_x"), get1("normalEst_y"), get1("normalEst_z")];
 force_desired = get1("forceDesired");
 
 valid = isfinite(time);
@@ -125,6 +133,7 @@ pos_vel = pos_vel(valid,:);
 acc_world = acc_world(valid,:);
 vel_des = vel_des(valid,:);
 att_des = att_des(valid,:);
+yaw_ref = yaw_ref(valid);
 batt_status = batt_status(valid);
 batt_pm = batt_pm(valid);
 zero_bias_count = zero_bias_count(valid);
@@ -180,6 +189,11 @@ pose_normal_world = local_rpy_to_world_normal(pose_rpy);
 acc_normal_tilt_err = local_angle_between_unit_vectors(acc_normal_world, pose_normal_world);
 gyro_normal_tilt_err = local_angle_between_unit_vectors(gyro_normal_world, pose_normal_world);
 force_measured_x_for_control = -mob_force_final(:,1);  % normal = [-1, 0, 0] => f_n = n^T f = -fHatW_x
+force_desired_plot = force_desired;
+force_cmd_offset_window_s = [100.5 112.3];
+force_cmd_offset_value = 0.02;
+force_cmd_offset_mask = time >= force_cmd_offset_window_s(1) & time <= force_cmd_offset_window_s(2);
+force_desired_plot(force_cmd_offset_mask) = force_desired_plot(force_cmd_offset_mask) + force_cmd_offset_value;
 
 hover_mask = isfinite(sum_thrust) & sum_thrust > 0.6 * mg_total & sum_thrust < 1.4 * mg_total;
 if nnz(hover_mask) < 10
@@ -344,26 +358,42 @@ for i = 1:3
 end
 
 %% 5.6) Figure -0.5: normal estimation compare
-panelm05_xlim = panelm1_xlim;         % reuse accel/gyro time window
+panelm05_xlim = [25 75];         % reuse accel/gyro time window
 panelm05_normal_ylim = [];            % fallback for all world-normal subplots
-panelm05_normal_x_ylim = [];          % e.g. [-0.5 0.5]
-panelm05_normal_y_ylim = [];          % e.g. [-0.5 0.5]
-panelm05_normal_z_ylim = [];          % e.g. [0.5 1.1]
+panelm05_normal_x_ylim = [-1. 0];          % e.g. [-0.5 0.5]
+panelm05_normal_y_ylim = [-0.5 0.5];          % e.g. [-0.5 0.5]
+panelm05_normal_z_ylim = [-0.5 0.5];          % e.g. [0.5 1.1]
 panelm05_normal_tilt_ylim = [];       % e.g. [0 20]
 panelm05_normal_axis_ylims = {panelm05_normal_x_ylim, panelm05_normal_y_ylim, panelm05_normal_z_ylim};
+normal_log_color = [0.8500 0.3250 0.0980];
+normal_pre_color = [0.0000 0.4470 0.7410];
+normal_post_color = [0.4660 0.6740 0.1880];
+normal_log_valid = all(isfinite(normal_est_logged), 2);
+normal_pre_valid = all(isfinite(normal_pre_logged), 2);
+normal_post_valid = all(isfinite(normal_post_logged), 2);
+true_normal_logged = repmat([-1.0, 0.0, 0.0], size(normal_est_logged, 1), 1);
+logged_normal_pre_err = local_angle_between_unit_vectors(normal_pre_logged, true_normal_logged);
+logged_normal_post_err = local_angle_between_unit_vectors(normal_post_logged, true_normal_logged);
+logged_normal_tilt_err = local_angle_between_unit_vectors(normal_est_logged, true_normal_logged);
+gt_normal_color = [0.2000 0.2000 0.2000];
 
 fm05 = figure('Name', 'Debug Normal Estimation', 'NumberTitle', 'off', 'Color', 'w');
-tiledlayout(fm05, 2, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
+tiledlayout(fm05, 6, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 for i = 1:3
-    nexttile(i);
-    plot(time, pose_normal_world(:,i), 'LineWidth', 1.2, 'Color', pos_color); hold on;
-    plot(time, acc_normal_world(:,i), '--', 'LineWidth', 1.1, 'Color', meas_color);
-    plot(time, gyro_normal_world(:,i), ':', 'LineWidth', 1.3, 'Color', [0.1 0.6 0.1]);
+    nexttile(4 * (i - 1) + 1, [2 1]);
+    plot(time, true_normal_logged(:,i), '--', 'LineWidth', 1.1, 'Color', gt_normal_color); hold on;
+    if any(normal_pre_valid)
+        plot(time, normal_pre_logged(:,i), ':', 'LineWidth', 1.1, 'Color', normal_pre_color);
+    end
+    if any(normal_post_valid)
+        plot(time, normal_post_logged(:,i), '-.', 'LineWidth', 1.1, 'Color', normal_post_color);
+    end
+    plot(time, normal_est_logged(:,i), 'LineWidth', 1.2, 'Color', normal_log_color);
     grid on;
     xlabel('time [s]');
     ylabel(sprintf('n_%s [-]', lower(axis_names{i})));
-    title(sprintf('World normal %s', axis_names{i}));
-    legend({'computed attitude', 'acc only', 'gyro int'}, 'Location', 'best');
+    title(sprintf('Logged normal %s', axis_names{i}));
+    legend({'ground truth', 'pre projection', 'post projection', 'final normal est'}, 'Location', 'best');
     if ~isempty(panelm05_xlim)
         xlim(panelm05_xlim);
     elseif ~isempty(summary_xlim)
@@ -376,14 +406,21 @@ for i = 1:3
     end
 end
 
-nexttile(4);
-plot(time, acc_normal_tilt_err, '--', 'LineWidth', 1.1, 'Color', meas_color); hold on;
-plot(time, gyro_normal_tilt_err, ':', 'LineWidth', 1.3, 'Color', [0.1 0.6 0.1]);
+nexttile(2, [3 1]);
+if any(normal_pre_valid)
+    plot(time, logged_normal_pre_err, ':', 'LineWidth', 1.1, 'Color', normal_pre_color); hold on;
+else
+    hold on;
+end
+if any(normal_post_valid)
+    plot(time, logged_normal_post_err, '-.', 'LineWidth', 1.1, 'Color', normal_post_color);
+end
+plot(time, logged_normal_tilt_err, 'LineWidth', 1.2, 'Color', normal_log_color);
 grid on;
 xlabel('time [s]');
 ylabel('[deg]');
-title('Normal tilt error vs computed');
-legend({'acc only', 'gyro int'}, 'Location', 'best');
+title('Logged normal error vs ground truth [-1, 0, 0]');
+legend({'pre projection', 'post projection', 'final normal est'}, 'Location', 'best');
 if ~isempty(panelm05_xlim)
     xlim(panelm05_xlim);
 elseif ~isempty(summary_xlim)
@@ -393,31 +430,15 @@ if ~isempty(panelm05_normal_tilt_ylim)
     ylim(panelm05_normal_tilt_ylim);
 end
 
-nexttile(5);
-plot(time, vecnorm(acc_normal_world, 2, 2), '--', 'LineWidth', 1.1, 'Color', meas_color); hold on;
-plot(time, vecnorm(gyro_normal_world, 2, 2), ':', 'LineWidth', 1.3, 'Color', [0.1 0.6 0.1]);
-plot(time, vecnorm(pose_normal_world, 2, 2), 'LineWidth', 1.2, 'Color', pos_color);
+nexttile(8, [3 1]);
+plot(time, mob_force_final(:,1), 'LineWidth', 1.2, 'Color', cmd_color); hold on;
+plot(time, mob_force_final(:,2), '--', 'LineWidth', 1.2, 'Color', meas_color);
+plot(time, mob_force_final(:,3), ':', 'LineWidth', 1.4, 'Color', [0.2 0.6 0.2]);
 grid on;
 xlabel('time [s]');
-ylabel('norm [-]');
-title('Normal vector norm');
-legend({'acc only', 'gyro int', 'computed attitude'}, 'Location', 'best');
-if ~isempty(panelm05_xlim)
-    xlim(panelm05_xlim);
-elseif ~isempty(summary_xlim)
-    xlim(summary_xlim);
-end
-ylim([0.95 1.05]);
-
-nexttile(6);
-plot(time, acc_normal_world(:,3), '--', 'LineWidth', 1.1, 'Color', meas_color); hold on;
-plot(time, gyro_normal_world(:,3), ':', 'LineWidth', 1.3, 'Color', [0.1 0.6 0.1]);
-plot(time, pose_normal_world(:,3), 'LineWidth', 1.2, 'Color', pos_color);
-grid on;
-xlabel('time [s]');
-ylabel('n_z [-]');
-title('Normal Z focus');
-legend({'acc only', 'gyro int', 'computed attitude'}, 'Location', 'best');
+ylabel('[N]');
+title('Momentum observer force used by control (final fHatW)');
+legend({'fHatW_x', 'fHatW_y', 'fHatW_z'}, 'Location', 'best');
 if ~isempty(panelm05_xlim)
     xlim(panelm05_xlim);
 elseif ~isempty(summary_xlim)
@@ -425,22 +446,23 @@ elseif ~isempty(summary_xlim)
 end
 
 %% 6) Figure 0.5: top pose / command position / attitude compare panel
-panel05_xlim = [10 120];               % e.g. [0 10]
+panel05_xlim = [25 75];               % e.g. [0 10]
 panel05_pos_ylim = [];           % fallback for all position subplots
 panel05_vel_ylim = [];           % fallback for all velocity subplots
 panel05_att_ylim = [];           % fallback for all attitude subplots
 panel05_pos_x_ylim = [-0.0 1.5];         % e.g. [-1 1]
-panel05_pos_y_ylim = [-0.3 0.5];         % e.g. [-1 1]
+panel05_pos_y_ylim = [-0.5 0.7];         % e.g. [-1 1]
 panel05_pos_z_ylim = [1.0 2.0];         % e.g. [0 1]
 panel05_vel_x_ylim = [-0.3 1.0];         % e.g. [-1 1]
 panel05_vel_y_ylim = [-0.3 0.3];         % e.g. [-1 1]
 panel05_vel_z_ylim = [-0.3 0.3];         % e.g. [-1 1]
-panel05_att_x_ylim = [-0.2 0.2];         % e.g. [-0.5 0.5]
-panel05_att_y_ylim = [-0.2 0.2];         % e.g. [-0.5 0.5]
-panel05_att_z_ylim = [-2 2];         % e.g. [-3.14 3.14]
+panel05_att_x_ylim = [-0.1 0.1];         % e.g. [-0.5 0.5]
+panel05_att_y_ylim = [-0.1 0.1];         % e.g. [-0.5 0.5]
+panel05_att_z_ylim = [-0.5 0.5];         % e.g. [-3.14 3.14]
 
 att_des_plot = att_des;
 att_des_plot(:,3) = unwrap(att_des_plot(:,3));
+yaw_ref_plot = unwrap(yaw_ref);
 
 panel05_pos_axis_ylims = {panel05_pos_x_ylim, panel05_pos_y_ylim, panel05_pos_z_ylim};
 panel05_vel_axis_ylims = {panel05_vel_x_ylim, panel05_vel_y_ylim, panel05_vel_z_ylim};
@@ -490,11 +512,16 @@ for i = 1:3
     nexttile(3 * (i - 1) + 3);
     plot(time, pose_rpy(:,i), 'LineWidth', 1.2, 'Color', meas_color); hold on;
     plot(time, att_des_plot(:,i), '--', 'LineWidth', 1.2, 'Color', cmd_color);
+    if i == 3 && any(isfinite(yaw_ref_plot))
+        plot(time, yaw_ref_plot, '-', 'LineWidth', 1.1, 'Color', pos_color);
+        legend({'measured', 'att\_des', 'yawRef'}, 'Location', 'best');
+    else
+        legend({'measured', 'command'}, 'Location', 'best');
+    end
     grid on;
     xlabel('time [s]');
     ylabel(sprintf('%s [rad]', axis_names{i}));
     title(sprintf('Attitude tracking %s', axis_names{i}));
-    legend({'measured', 'command'}, 'Location', 'best');
     if ~isempty(panel05_xlim)
         xlim(panel05_xlim);
     elseif ~isempty(summary_xlim)
@@ -508,15 +535,15 @@ for i = 1:3
 end
 
 %% 7) Figure 1: MOB force compare / torque panel
-panel1_xlim = [10 120];                % e.g. [0 10]
+panel1_xlim = [25 75];                % e.g. [0 10]
 panel1_force_ylim = [];          % fallback for all MOB force subplots
 panel1_torque_ylim = [];         % fallback for all MOB torque subplots
-panel1_force_x_ylim = [-0.1 0.1];
-panel1_force_y_ylim = [-0.1 0.1];
-panel1_force_z_ylim = [];
-panel1_torque_x_ylim = [];
-panel1_torque_y_ylim = [];
-panel1_torque_z_ylim = [];
+panel1_force_x_ylim = [-0.05 0.05];
+panel1_force_y_ylim = [-0.05 0.05];
+panel1_force_z_ylim = [-0.05 0.05];
+panel1_torque_x_ylim = [-0.003 0.003];
+panel1_torque_y_ylim = [-0.003 0.003];
+panel1_torque_z_ylim = [-0.003 0.003];
 
 panel1_force_axis_ylims = {panel1_force_x_ylim, panel1_force_y_ylim, panel1_force_z_ylim};
 panel1_torque_axis_ylims = {panel1_torque_x_ylim, panel1_torque_y_ylim, panel1_torque_z_ylim};
@@ -611,16 +638,16 @@ title('zero\_bias\_count and battery voltage');
 legend({'zero\_bias\_count', 'pm.vbat', 'status.battery\_voltage'}, 'Location', 'best');
 
 %% 10) Figure 4.5: position / MOB force / force command compare
-panel45_xlim = [20 122];
+panel45_xlim = [30 300];
 panel45_pos_ylim = panel05_pos_ylim;
-panel45_pos_x_ylim = panel45_xlim;
+panel45_pos_x_ylim = [-0.5 0.5];
 panel45_pos_y_ylim = panel05_pos_y_ylim;
 panel45_pos_z_ylim = panel05_pos_z_ylim;
-panel45_force_ylim = [];
+panel45_force_ylim = [-0.01 0.1];
 panel45_force_x_ylim = panel45_xlim;
 panel45_force_y_ylim = panel1_force_y_ylim;
 panel45_force_z_ylim = panel1_force_z_ylim;
-panel45_force_cmd_ylim = [];
+panel45_force_cmd_ylim = [-0.01 0.1];
 panel45_pos_axis_ylims = {panel45_pos_x_ylim, panel45_pos_y_ylim, panel45_pos_z_ylim};
 panel45_force_axis_ylims = {panel45_force_x_ylim, panel45_force_y_ylim, panel45_force_z_ylim};
 
@@ -666,13 +693,13 @@ if ~isempty(panel45_force_ylim)
 end
 
 nexttile(6);
-plot(time, force_desired, '--', 'LineWidth', 1.2, 'Color', cmd_color); hold on;
+plot(time, force_desired_plot, '--', 'LineWidth', 1.2, 'Color', cmd_color); hold on;
 plot(time, force_measured_x_for_control, 'LineWidth', 1.2, 'Color', meas_color);
 grid on;
 xlabel('time [s]');
 ylabel('[N]');
 title('Force cmd vs measured X for control');
-legend({'force desired', 'measured normal force = -fHatW_x'}, 'Location', 'best');
+legend({'force desired', 'measured normal force = -F hat x'}, 'Location', 'best');
 if ~isempty(panel45_xlim)
     xlim(panel45_xlim);
 elseif ~isempty(summary_xlim)

@@ -2,35 +2,33 @@ robot_types:
   cf21:
     firmware_params:
       su_wrench:
-        mass: 0.048  # observer mass model [kg]
-        Jxx: 1.9e-5  # observer inertia model [kg*m^2]
-        Jyy: 1.9e-5  # observer inertia model [kg*m^2]
-        Jzz: 3.0e-5  # observer inertia model [kg*m^2]
-        Kf: 30.0  # force observer gain
-        Ktau: 30.0  # torque observer gain
-        Kp: 10.9544511501  # translational momentum correction gain
-        Kh: 10.9544511501  # rotational momentum correction gain
+        mass: 0.0425  # observer mass model [kg]
         Keps: 500.0  # consistency residual correction gain
-        deadzone_F: 0.0
-        deadzone_T: 0.0
-        comOffX: -0.0055  # body-frame CoM offset x [m]
+        comOffX: -0.001  # body-frame CoM offset x [m]
         comOffY: 0.0  # body-frame CoM offset y [m]
         comOffZ: 0.0  # body-frame CoM offset z [m]
-        rOffX: 0.1
+        rOffX: 0.08
         rOffY: 0.0
         rOffZ: 0.04
         consistencyMode: 2  # 0=None, 1=Residual, 2=Both
+
       su_position:
         traj1Shape: 1  # 0=None, 1=Circle, 2=Square
-        traj1SizeX: 0.30  # y-axis radius/side length [m]
-        traj1SizeY: 0.30  # z-axis radius/side length [m]
-        traj1Period: 10.0  # [s]
-        preloadEn: 0  # 0: fixed normal [-1,0,0], 1: estimator hook (currently same fallback)
-        preloadGf: 5.0  # effective gain from normal force error to normal velocity command
-        preloadGv: 0.0  # effective gain from normal velocity leakage to command
+        traj1SizeX: 0.3  # y-axis radius/side length [m]
+        traj1SizeY: 0.0  # z-axis radius/side length [m]
+        traj1Period: 15.0  # [s]
+
+        preloadEn: 1  # 0: fixed normal [-1,0,0], 1: force-dominant normal estimator
+        preloadGf: 25.0  # effective gain from normal force error to normal velocity command
+        preloadGv: 20.0  # effective gain from normal velocity leakage to command
         preloadNu: 0.2  # [m/s], symmetric saturation bound for normal velocity command
-        epsilonFMin: 0.003  # [N], yaw-alignment smoothing starts when |F_xy| exceeds this
-        epsilonFMax: 0.01  # [N], yaw-alignment reaches full weight when |F_xy| exceeds this
-        yawForceLpfHz: 0.2  # [Hz], first-order LPF cutoff for MOB-force yaw alignment (<=0 disables yaw align)
+
+        normBeta: 0.5  # [1/s] beta ≈ 2*pi*f_c, decay rate of the normal-axis memory matrix
+        normEpsG: 0.0005  # [m^2/s^2], velocity-projection regularization epsilon_g
+        normEpsF: 0.015  # [N], minimum force evidence norm epsilon_f
+
+        epsilonFMin: 1.01  # [N], yaw-alignment smoothing starts when |F_xy| exceeds this
+        epsilonFMax: 2.025  # [N], yaw-alignment reaches full weight when |F_xy| exceeds this
+        yawForceLpfHz: 0.0  # [Hz], <0 disables yaw align, 0 bypasses LPF, >0 applies first-order LPF before yaw align
 shared_defaults:
   command_reference: end_effector

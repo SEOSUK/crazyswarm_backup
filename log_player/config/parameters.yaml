@@ -3,7 +3,8 @@ csv_playback:
     launch_rviz: true
     start_offset_sec: 0.0
     playback_rate: 1.0
-    publish_topic: "/data_logging_msg"
+    sample_hz: 50.0
+    publish_topic: "/data_logging_msg_debug"
 
 log_decoder:
   ros__parameters:

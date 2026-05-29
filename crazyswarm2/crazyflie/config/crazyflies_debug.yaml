@@ -29,49 +29,32 @@ robot_types:
         cf_su_motor_thrust:
           frequency: 20
           vars: [suWrenchObs.f1, suWrenchObs.f2, suWrenchObs.f3, suWrenchObs.f4]
-        # Velocity from firmware stateEstimate.
-        cf_su_state_vel:
+        # Velocity from firmware stateEstimate + position differentiation helper.
+        cf_su_vel_pair:
           frequency: 20
-          vars: [suWrenchObs.stateVx, suWrenchObs.stateVy, suWrenchObs.stateVz]
-        # Velocity from position differentiation helper.
-        cf_su_pos_vel:
+          vars: [suWrenchObs.stateVx, suWrenchObs.stateVy, suWrenchObs.stateVz, suWrenchObs.posVx, suWrenchObs.posVy, suWrenchObs.posVz]
+        # Raw body-frame acceleration + raw gyro input.
+        cf_imu_raw_pair:
           frequency: 20
-          vars: [suWrenchObs.posVx, suWrenchObs.posVy, suWrenchObs.posVz]
-#         # Raw body-frame acceleration used as Mahony/complementary input before gravity trim LPF output stage.
-        cf_imu_acc_raw:
+          vars: [acc.x, acc.y, acc.z, gyro.x, gyro.y, gyro.z]
+        cf_su_acc_normal:
           frequency: 20
-          vars: [acc.x, acc.y, acc.z]
-        # Raw body-frame angular rate used as Mahony/complementary gyro input.
-        cf_imu_gyro_raw:
+          vars: [suWrenchObs.accWx, suWrenchObs.accWy, suWrenchObs.accWz, suPosRef.nEstX, suPosRef.nEstY, suPosRef.nEstZ]
+        cf_su_normal_debug:
           frequency: 20
-          vars: [gyro.x, gyro.y, gyro.z]
-#         # World-frame acceleration from firmware state.acc.
-        cf_su_acc:
-          frequency: 20
-          vars: [suWrenchObs.accWx, suWrenchObs.accWy, suWrenchObs.accWz]
-        vel_des:
+          vars: [suPosRef.nPreX, suPosRef.nPreY, suPosRef.nPreZ, suPosRef.nPostX, suPosRef.nPostY, suPosRef.nPostZ]
+        vel_att_des:
           frequency: 10
-          vars: [posCtl.targetVX, posCtl.targetVY, posCtl.targetVZ]
-#         # Desired roll/pitch/yaw command from controller.
-        att_des:
+          vars: [posCtl.targetVX, posCtl.targetVY, posCtl.targetVZ, controller.roll, controller.pitch, controller.yaw]
+        cf_ctrl_misc:
           frequency: 10
-          vars: [controller.roll, controller.pitch, controller.yaw]
-#         # Battery voltage only.
-        cf_su_voltage:
-          frequency: 10
-          vars: [pm.vbat]
+          vars: [pm.vbat, ctrltarget.x, ctrltarget.y, ctrltarget.z]
         cf_mob_pure:
           frequency: 20
           vars: [suWrenchObs.fHatNWx, suWrenchObs.fHatNWy, suWrenchObs.fHatNWz, suWrenchObs.tauLWx, suWrenchObs.tauLWy, suWrenchObs.tauLWz]
-        cf_mob_residual:
+        cf_mob_res_final:
           frequency: 20
-          vars: [suWrenchObs.fHatRWx, suWrenchObs.fHatRWy, suWrenchObs.fHatRWz]
-        cf_mob_final:
-          frequency: 20
-          vars: [suWrenchObs.fHatWx, suWrenchObs.fHatWy, suWrenchObs.fHatWz]
-        cf_ctrl_target_pos:
-          frequency: 20
-          vars: [ctrltarget.x, ctrltarget.y, ctrltarget.z]
+          vars: [suWrenchObs.fHatRWx, suWrenchObs.fHatRWy, suWrenchObs.fHatRWz, suWrenchObs.fHatWx, suWrenchObs.fHatWy, suWrenchObs.fHatWz]
 #         # Desired translational velocity from the position controller.
 
 
@@ -87,9 +70,6 @@ robot_types:
       imu_sensors:
         accTrimRoll: -0.8
         accTrimPitch: -0.4
-        accBiasX: 0.0
-        accBiasY: 0.0
-        accBiasZ: 0.0
 
 
       kalman:
@@ -123,14 +103,14 @@ robot_types:
       # - Feedforward term is added as outFF = kff * desired.
       posCtlPid:
         xKp: 1.3 # Default: 2.0
-        yKp: 1.7 # Default: 2.0
-        zKp: 2.0 # Default: 2.0
+        yKp: 1.3 # Default: 2.0
+        zKp: 2.2 # Default: 2.0
         xKi: 0.0 # Default: 0.0
         yKi: 0.0 # Default: 0.0
         zKi: 0.0 # Default: 0.5
         xKd: 0.15 # Default: 0.0
         yKd: 0.15 # Default: 0.0
-        zKd: 0.15 # Default: 0.0
+        zKd: 0.25 # Default: 0.0
         xKff: 0.0 # Default: 0.0
         yKff: 0.0 # Default: 0.0
         zKff: 0.0 # Default: 0.0
@@ -140,14 +120,14 @@ robot_types:
         posZFiltCut: 20.0 # Default: 20.0 Hz, Z position PID D-term LPF cutoff
       velCtlPid:
         vxKp: 14.0 # Default: 25.0
-        vyKp: 20.0 # Default: 25.0
-        vzKp: 14.0 # Default: 25.0
+        vyKp: 14.0 # Default: 25.0
+        vzKp: 20.0 # Default: 25.0
         vxKi: 0. # Default: 1.0
         vyKi: 0. # Default: 1.0
         vzKi: 7.0 # Default: 15.0
         vxKd: 1.2 # Default: 0.0
         vyKd: 1.2 # Default: 0.0
-        vzKd: 1.2 # Default: 0.0
+        vzKd: 2.0 # Default: 0.0
         vxKFF: 0.0 # Default: 0.0
         vyKFF: 0.0 # Default: 0.0
         vzKFF: 0.0 # Default: 0.0
@@ -155,33 +135,33 @@ robot_types:
         velFiltCut: 20.0 # Default: 20.0 Hz, XY velocity PID D-term LPF cutoff
         velZFiltEn: 1 # Default: 1, Z velocity PID D-term LPF enable
         velZFiltCut: 20.0 # Default: 20.0 Hz, Z velocity PID D-term LPF cutoff
-        frameMode: 0 # 0: default yaw-aligned body frame, 1: world-frame position/velocity PID
+        frameMode: 1 # 0: default yaw-aligned body frame, 1: world-frame position/velocity PID
 
       pid_attitude:
         roll_kp: 6.5 # Default: 6.0
-        pitch_kp: 8.0 # Default: 6.0
-        yaw_kp: 7.5 # Default: 6.0
+        pitch_kp: 8.5 # Default: 6.0
+        yaw_kp: 12.5 # Default: 6.0
         roll_ki: 2.0 # Default: 3.0
         pitch_ki: 2.0 # Default: 3.0
         yaw_ki: 0.7 # Default: 1.0
         roll_kd: 0.3 # Default: 0.0
-        pitch_kd: 1.1 # Default: 0.0
-        yaw_kd: 0.7 # Default: 0.35
+        pitch_kd: 0.7 # Default: 0.0
+        yaw_kd: 1.0 # Default: 0.35
         roll_kff: 0.0 # Default: 0.0
         pitch_kff: 0.0 # Default: 0.0
         yaw_kff: 0.0 # Default: 0.0
         attFiltEn: 1 # Default: 0, attitude PID D-term LPF enable
-        attFiltCut: 60.0 # Default: 15.0 Hz, attitude PID D-term LPF cutoff
+        attFiltCut: 15.0 # Default: 15.0 Hz, attitude PID D-term LPF cutoff
       pid_rate:
         roll_kp: 220.0 # Default: 200.0
         pitch_kp: 250.0 # Default: 200.0
-        yaw_kp: 280.0 # Default: 120.0
+        yaw_kp: 300.0 # Default: 120.0
         roll_ki: 300.0 # Default: 400.0
         pitch_ki: 300.0 # Default: 400.0
         yaw_ki: 20.0 # Default: 16.7
         roll_kd: 2.5 # Default: 2.5
         pitch_kd: 3.5 # Default: 2.5
-        yaw_kd: 10.5 # Default: 0.0
+        yaw_kd: 13.5 # Default: 0.0
         roll_kff: 0.0 # Default: 0.0
         pitch_kff: 0.0 # Default: 0.0
         yaw_kff: 0.0 # Default: 0.0
@@ -189,7 +169,7 @@ robot_types:
         omxFiltCut: 60.0 # Default: 30.0 Hz, roll-rate PID D-term LPF cutoff
         omyFiltCut: 60.0 # Default: 30.0 Hz, pitch-rate PID D-term LPF cutoff
         omzFiltCut: 60.0 # Default: 30.0 Hz, yaw-rate PID D-term LPF cutoff
-
+        
     broadcasts:
       num_repeats: 1 # number of times broadcast commands are repeated
       delay_between_repeats_ms: 1 # delay in milliseconds between individual repeats

@@ -84,7 +84,10 @@ public:
   // 63..65 : body-frame accel xyz [G], after manual bias correction and before gravity-trim/LPF
   // 66..68 : body-frame gyro xyz [deg/s], Mahony/complementary gyro input
   // 69     : force_desired [N], scalar preload force command from PositionControl
-  static constexpr int kDataLen = 70;
+  // 70..72 : normal_preproj xyz [-], normalized force-direction evidence
+  // 73..75 : normal_postproj xyz [-], velocity-projected normal candidate
+  // 76..78 : normal_estimation xyz [-], estimated world normal vector
+  static constexpr int kDataLen = 79;
 
   DataLoggingDebugNode()
   : Node("data_logging_debug")
@@ -113,8 +116,8 @@ public:
       cf_ns_ + "/cmd_position", 10, std::bind(&DataLoggingDebugNode::cmdPositionCallback, this, _1));
     sub_cmd_position_control_ = this->create_subscription<crazyflie_interfaces::msg::PositionControl>(
       cf_ns_ + "/cmd_position_control", 10, std::bind(&DataLoggingDebugNode::cmdPositionControlCallback, this, _1));
-    sub_fw_cmd_position_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_ctrl_target_pos", 10, std::bind(&DataLoggingDebugNode::fwCmdPositionCallback, this, _1));
+    sub_ctrl_misc_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_ctrl_misc", 10, std::bind(&DataLoggingDebugNode::ctrlMiscCallback, this, _1));
     sub_status_ = this->create_subscription<crazyflie_interfaces::msg::Status>(
       cf_ns_ + "/status", 10, std::bind(&DataLoggingDebugNode::statusCallback, this, _1));
     sub_motor_thrust_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
@@ -127,30 +130,22 @@ public:
       cf_ns_ + "/cf_su_world_force", 10, std::bind(&DataLoggingDebugNode::worldForceCallback, this, _1));
     sub_body_torque_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_su_body_torque", 10, std::bind(&DataLoggingDebugNode::bodyTorqueCallback, this, _1));
-    sub_state_vel_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_su_state_vel", 10, std::bind(&DataLoggingDebugNode::stateVelCallback, this, _1));
-    sub_pos_vel_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_su_pos_vel", 10, std::bind(&DataLoggingDebugNode::posVelCallback, this, _1));
-    sub_acc_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_su_acc", 10, std::bind(&DataLoggingDebugNode::accCallback, this, _1));
-    sub_acc_raw_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_imu_acc_raw", 10, std::bind(&DataLoggingDebugNode::accRawCallback, this, _1));
-    sub_gyro_raw_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_imu_gyro_raw", 10, std::bind(&DataLoggingDebugNode::gyroRawCallback, this, _1));
-    sub_vel_des_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/vel_des", 10, std::bind(&DataLoggingDebugNode::velDesCallback, this, _1));
-    sub_att_des_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/att_des", 10, std::bind(&DataLoggingDebugNode::attDesCallback, this, _1));
-    sub_voltage_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_su_voltage", 10, std::bind(&DataLoggingDebugNode::voltageCallback, this, _1));
+    sub_vel_pair_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_su_vel_pair", 10, std::bind(&DataLoggingDebugNode::velPairCallback, this, _1));
+    sub_acc_normal_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_su_acc_normal", 10, std::bind(&DataLoggingDebugNode::accNormalCallback, this, _1));
+    sub_normal_debug_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_su_normal_debug", 10, std::bind(&DataLoggingDebugNode::normalDebugCallback, this, _1));
+    sub_imu_raw_pair_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_imu_raw_pair", 10, std::bind(&DataLoggingDebugNode::imuRawPairCallback, this, _1));
+    sub_vel_att_des_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/vel_att_des", 10, std::bind(&DataLoggingDebugNode::velAttDesCallback, this, _1));
     sub_debug_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_su_debug", 10, std::bind(&DataLoggingDebugNode::debugCallback, this, _1));
     sub_mob_pure_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_mob_pure", 10, std::bind(&DataLoggingDebugNode::mobPureCallback, this, _1));
-    sub_mob_residual_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_mob_residual", 10, std::bind(&DataLoggingDebugNode::mobResidualCallback, this, _1));
-    sub_mob_final_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      cf_ns_ + "/cf_mob_final", 10, std::bind(&DataLoggingDebugNode::mobFinalCallback, this, _1));
+    sub_mob_res_final_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_mob_res_final", 10, std::bind(&DataLoggingDebugNode::mobResFinalCallback, this, _1));
 
     RCLCPP_INFO(get_logger(), "data_logging_debug node started");
   }
@@ -195,6 +190,9 @@ public:
     push3(out, acc_raw_body_);
     push3(out, gyro_raw_body_);
     out.data.push_back(force_desired_);
+    push3(out, normal_preproj_);
+    push3(out, normal_postproj_);
+    push3(out, normal_est_);
 
     if (out.data.size() != static_cast<size_t>(kDataLen)) {
       out.data.resize(kDataLen, qnan_debug());
@@ -264,7 +262,10 @@ private:
       << "mobResidual_x,mobResidual_y,mobResidual_z,"
       << "accRawBody_x,accRawBody_y,accRawBody_z,"
       << "gyroBody_x,gyroBody_y,gyroBody_z,"
-      << "forceDesired\n";
+      << "forceDesired,"
+      << "normalPre_x,normalPre_y,normalPre_z,"
+      << "normalPost_x,normalPost_y,normalPost_z,"
+      << "normalEst_x,normalEst_y,normalEst_z\n";
     csv_.flush();
   }
 
@@ -311,13 +312,61 @@ private:
   void bodyForceCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, body_force_); }
   void worldForceCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, world_force_); }
   void bodyTorqueCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, body_torque_); }
-  void stateVelCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, state_vel_); }
-  void posVelCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, pos_vel_); }
-  void accCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, acc_); }
-  void accRawCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, acc_raw_body_); }
-  void gyroRawCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, gyro_raw_body_); }
-  void velDesCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, vel_des_); }
-  void attDesCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy3(msg, att_des_); }
+  void velPairCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (msg->values.size() >= 6) {
+      state_vel_[0] = msg->values[0];
+      state_vel_[1] = msg->values[1];
+      state_vel_[2] = msg->values[2];
+      pos_vel_[0] = msg->values[3];
+      pos_vel_[1] = msg->values[4];
+      pos_vel_[2] = msg->values[5];
+    }
+  }
+  void accNormalCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (msg->values.size() >= 6) {
+      acc_[0] = msg->values[0];
+      acc_[1] = msg->values[1];
+      acc_[2] = msg->values[2];
+      normal_est_[0] = msg->values[3];
+      normal_est_[1] = msg->values[4];
+      normal_est_[2] = msg->values[5];
+    }
+  }
+  void normalDebugCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (msg->values.size() >= 6) {
+      normal_preproj_[0] = msg->values[0];
+      normal_preproj_[1] = msg->values[1];
+      normal_preproj_[2] = msg->values[2];
+      normal_postproj_[0] = msg->values[3];
+      normal_postproj_[1] = msg->values[4];
+      normal_postproj_[2] = msg->values[5];
+    }
+  }
+  void imuRawPairCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (msg->values.size() >= 6) {
+      acc_raw_body_[0] = msg->values[0];
+      acc_raw_body_[1] = msg->values[1];
+      acc_raw_body_[2] = msg->values[2];
+      gyro_raw_body_[0] = msg->values[3];
+      gyro_raw_body_[1] = msg->values[4];
+      gyro_raw_body_[2] = msg->values[5];
+    }
+  }
+  void velAttDesCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (msg->values.size() >= 6) {
+      vel_des_[0] = msg->values[0];
+      vel_des_[1] = msg->values[1];
+      vel_des_[2] = msg->values[2];
+      att_des_[0] = msg->values[3];
+      att_des_[1] = msg->values[4];
+      att_des_[2] = msg->values[5];
+    }
+  }
   void cmdPositionCallback(const crazyflie_interfaces::msg::Position::SharedPtr msg)
   {
     cmd_xyzyaw_[0] = msg->x;
@@ -333,14 +382,13 @@ private:
   {
     status_batt_v_ = msg->battery_voltage;
   }
-  void fwCmdPositionCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  void ctrlMiscCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
   {
-    copy3(msg, fw_cmd_xyz_);
-  }
-  void voltageCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
-  {
-    if (!msg->values.empty()) {
+    if (msg->values.size() >= 4) {
       pm_vbat_ = msg->values[0];
+      fw_cmd_xyz_[0] = msg->values[1];
+      fw_cmd_xyz_[1] = msg->values[2];
+      fw_cmd_xyz_[2] = msg->values[3];
     }
   }
 
@@ -363,14 +411,16 @@ private:
     }
   }
 
-  void mobResidualCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  void mobResFinalCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
   {
-    copy3(msg, mob_force_residual_);
-  }
-
-  void mobFinalCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
-  {
-    copy3(msg, mob_force_final_);
+    if (msg->values.size() >= 6) {
+      mob_force_residual_[0] = msg->values[0];
+      mob_force_residual_[1] = msg->values[1];
+      mob_force_residual_[2] = msg->values[2];
+      mob_force_final_[0] = msg->values[3];
+      mob_force_final_[1] = msg->values[4];
+      mob_force_final_[2] = msg->values[5];
+    }
   }
 
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr data_pub_;
@@ -378,25 +428,21 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_pose_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Position>::SharedPtr sub_cmd_position_;
   rclcpp::Subscription<crazyflie_interfaces::msg::PositionControl>::SharedPtr sub_cmd_position_control_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_fw_cmd_position_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_ctrl_misc_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Status>::SharedPtr sub_status_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_motor_thrust_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_motor_pwm_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_body_force_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_world_force_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_body_torque_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_state_vel_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_pos_vel_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_acc_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_acc_raw_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_gyro_raw_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_vel_des_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_att_des_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_voltage_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_vel_pair_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_acc_normal_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_normal_debug_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_imu_raw_pair_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_vel_att_des_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_debug_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_pure_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_residual_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_final_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_res_final_;
 
   std::string csv_dir_;
   std::string csv_path_;
@@ -431,6 +477,9 @@ private:
   std::array<double, 3> mob_force_final_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> mob_torque_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> mob_residual_ = {qnan_debug(), qnan_debug(), qnan_debug()};
+  std::array<double, 3> normal_preproj_ = {qnan_debug(), qnan_debug(), qnan_debug()};
+  std::array<double, 3> normal_postproj_ = {qnan_debug(), qnan_debug(), qnan_debug()};
+  std::array<double, 3> normal_est_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   double force_desired_ = qnan_debug();
 };
 

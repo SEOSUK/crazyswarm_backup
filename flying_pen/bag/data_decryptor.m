@@ -444,7 +444,7 @@ vel_measured_unit(measured_norm_valid, :) = ...
 
 % End-effector-frame velocity from rigid-body forward kinematics.
 % v_ee^body = R_wb' * v_drone^world + omega_body x r_ee^body
-ee_offset_body_m = [0.10, 0.00, 0.04];
+ee_offset_body_m = [0.08, 0.00, 0.04];
 vel_ee_desired = nan(size(vel_actual));
 vel_ee_measured = nan(size(vel_measured));
 for i = 1:N

@@ -8,6 +8,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <eigen3/Eigen/Core>
+#include <eigen3/Eigen/Geometry>
 #include <deque>
 #include <cmath>
 
@@ -15,6 +16,11 @@ using namespace std::chrono_literals;
 
 namespace {
 constexpr double kDegToRad = M_PI / 180.0;
+
+bool isFiniteVector(const Eigen::Vector3d & v)
+{
+  return std::isfinite(v.x()) && std::isfinite(v.y()) && std::isfinite(v.z());
+}
 }
 
 class RvizVisual : public rclcpp::Node
@@ -42,6 +48,7 @@ public:
     fw_cmd_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/fw_cmd_position_marker", 10);
     raw_force_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/mob_force_pure_marker", 10);
     scaled_force_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/mob_force_residual_marker", 10);
+    normal_est_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/normal_est_marker", 10);
     acc_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/acc_marker", 10);
     vel_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/vel_marker", 10);
     wall_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/wall_marker", 10);
@@ -53,6 +60,7 @@ public:
     fw_cmd_pos_.setZero();
     mob_force_pure_.setZero();
     mob_force_residual_.setZero();
+    normal_est_.setZero();
     world_vel_.setZero();
     world_acc_.setZero();
 
@@ -62,10 +70,10 @@ public:
 private:
   void dataCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
   {
-    if (msg->data.size() < 66) {
+    if (msg->data.size() < 79) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000,
-        "msg size too small (%zu), expected >= 66", msg->data.size());
+        "msg size too small (%zu), expected >= 79", msg->data.size());
       return;
     }
 
@@ -101,12 +109,29 @@ private:
     mob_force_residual_[0] = msg->data[51];
     mob_force_residual_[1] = msg->data[52];
     mob_force_residual_[2] = msg->data[53];
+
+    normal_est_[0] = msg->data[76];
+    normal_est_[1] = msg->data[77];
+    normal_est_[2] = msg->data[78];
+
+    pose_valid_ = isFiniteVector(pos_) && isFiniteVector(rpy_meas_);
   }
 
   void publishTfTimer()
   {
     const auto stamp = get_clock()->now();
+    publishWall(stamp);
+
+    if (!pose_valid_) {
+      publishTrajectoryHistory(stamp);
+      return;
+    }
+
     const auto ee_pos = computeEndEffectorPosition();
+    if (!isFiniteVector(ee_pos)) {
+      publishTrajectoryHistory(stamp);
+      return;
+    }
 
     geometry_msgs::msg::TransformStamped tf_meas;
     tf_meas.header.stamp = stamp;
@@ -133,6 +158,16 @@ private:
     tf_ee.transform.translation.z = ee_pos.z();
     tf_ee.transform.rotation = tf_meas.transform.rotation;
     tf_broadcaster_->sendTransform(tf_ee);
+
+    geometry_msgs::msg::TransformStamped tf_normal;
+    tf_normal.header.stamp = stamp;
+    tf_normal.header.frame_id = "world";
+    tf_normal.child_frame_id = "normal_frame";
+    tf_normal.transform.translation.x = ee_pos.x();
+    tf_normal.transform.translation.y = ee_pos.y();
+    tf_normal.transform.translation.z = ee_pos.z();
+    tf_normal.transform.rotation = computeNormalFrameQuaternion();
+    tf_broadcaster_->sendTransform(tf_normal);
 
     geometry_msgs::msg::TransformStamped tf_cmd;
     tf_cmd.header.stamp = stamp;
@@ -180,9 +215,9 @@ private:
 
     publishArrow(raw_force_pub_, stamp, "world", "mob_force_pure", 0, p0, mob_force_pure_, 10.0, 0.02, 0.04, 0.06, 1.0f, 0.2f, 0.2f);
     publishArrow(scaled_force_pub_, stamp, "world", "mob_force_residual", 0, p0, mob_force_residual_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
+    publishArrow(normal_est_pub_, stamp, "world", "normal_estimation", 0, p0, normal_est_, 0.25, 0.02, 0.04, 0.06, 0.1f, 0.8f, 0.2f);
     publishArrow(acc_pub_, stamp, "world", "acceleration", 0, p0, world_acc_, 0.5, 0.015, 0.03, 0.05, 0.0f, 0.0f, 1.0f);
     publishArrow(vel_pub_, stamp, "world", "velocity", 0, p0, world_vel_, 1.0, 0.015, 0.03, 0.05, 1.0f, 0.8f, 0.0f);
-    publishWall(stamp);
     pushTrajectorySample(ee_pos, stamp);
     publishTrajectoryHistory(stamp);
   }
@@ -220,8 +255,53 @@ private:
       pos_[2] + offset_world.z());
   }
 
+  geometry_msgs::msg::Quaternion computeNormalFrameQuaternion() const
+  {
+    geometry_msgs::msg::Quaternion q_msg;
+    q_msg.w = 1.0;
+
+    Eigen::Vector3d x_axis = -normal_est_;
+    const double x_norm = x_axis.norm();
+    if (x_norm < 1e-6) {
+      return q_msg;
+    }
+    x_axis /= x_norm;
+
+    Eigen::Vector3d alpha_ref(0.0, 0.0, 1.0);
+    Eigen::Vector3d y_axis = alpha_ref.cross(x_axis);
+    if (y_axis.norm() < 1e-6) {
+      y_axis = Eigen::Vector3d(0.0, 1.0, 0.0).cross(x_axis);
+    }
+    if (y_axis.norm() < 1e-6) {
+      return q_msg;
+    }
+    y_axis.normalize();
+
+    Eigen::Vector3d z_axis = x_axis.cross(y_axis);
+    if (z_axis.norm() < 1e-6) {
+      return q_msg;
+    }
+    z_axis.normalize();
+
+    Eigen::Matrix3d rot;
+    rot.col(0) = x_axis;
+    rot.col(1) = y_axis;
+    rot.col(2) = z_axis;
+
+    const Eigen::Quaterniond q(rot);
+    q_msg.x = q.x();
+    q_msg.y = q.y();
+    q_msg.z = q.z();
+    q_msg.w = q.w();
+    return q_msg;
+  }
+
   void pushTrajectorySample(const Eigen::Vector3d & ee_pos, const rclcpp::Time & stamp)
   {
+    if (!isFiniteVector(ee_pos)) {
+      return;
+    }
+
     const double sample_period = std::max(1e-3, history_sample_period_);
     const double keep_duration = std::max(sample_period, history_duration_);
 
@@ -259,6 +339,7 @@ private:
     marker.action = trajectory_history_.size() >= 2 ?
       visualization_msgs::msg::Marker::ADD :
       visualization_msgs::msg::Marker::DELETE;
+    marker.pose.orientation.w = 1.0;
     marker.scale.x = 0.01;
     marker.color.a = 0.65f;
     marker.color.r = 0.22f;
@@ -266,10 +347,8 @@ private:
     marker.color.b = 0.26f;
     marker.lifetime = rclcpp::Duration(0, 0);
 
-    if (trajectory_history_.size() >= 2) {
-      for (const auto & sample : trajectory_history_) {
-        marker.points.push_back(sample.point);
-      }
+    for (const auto & sample : trajectory_history_) {
+      marker.points.push_back(sample.point);
     }
 
     ee_history_pub_->publish(marker);
@@ -387,6 +466,7 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr fw_cmd_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr raw_force_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr scaled_force_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr normal_est_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr acc_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr vel_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr wall_pub_;
@@ -399,6 +479,7 @@ private:
   double cmd_yaw_deg_{0.0};
   Eigen::Vector3d mob_force_pure_;
   Eigen::Vector3d mob_force_residual_;
+  Eigen::Vector3d normal_est_;
   Eigen::Vector3d world_vel_;
   Eigen::Vector3d world_acc_;
   std::array<double, 3> ee_offset_;
@@ -407,6 +488,7 @@ private:
   double history_duration_{30.0};
   rclcpp::Time last_history_sample_time_{0, 0, RCL_ROS_TIME};
   std::deque<TrajectorySample> trajectory_history_;
+  bool pose_valid_{false};
 };
 
 int main(int argc, char* argv[])

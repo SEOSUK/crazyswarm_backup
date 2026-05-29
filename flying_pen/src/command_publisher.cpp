@@ -23,7 +23,7 @@
 #include <vector>
 
 using namespace std::chrono_literals;
-static constexpr auto kVelocityModeHandoffDelay = 150ms;
+static constexpr auto kVelocityModeHandoffDelay = 50ms;
 
 class CommandPublisher : public rclcpp::Node
 {

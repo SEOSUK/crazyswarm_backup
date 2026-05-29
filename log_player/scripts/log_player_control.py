@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-LOG_ROOT = Path("/home/seosuk/hitl_ws/src/flying_pen/bag/0428_experient")
+LOG_ROOT = Path("/home/seosuk/hitl_ws/src/flying_pen/bag/logging")
 
 
 def get_log_root() -> Path:
@@ -81,7 +81,6 @@ class LogPlayerControlNode(Node):
 
         self.csv_player_client = self.create_client(SetParameters, "/csv_player/set_parameters")
         self.rviz_visual_client = self.create_client(SetParameters, "/rviz_visual/set_parameters")
-        self.offline_logger_client = self.create_client(SetParameters, "/offline_result_logger/set_parameters")
         self.latest_status = {
             "loaded": False,
             "progress": 0.0,
@@ -117,7 +116,6 @@ class LogPlayerControlNode(Node):
         if csv_path:
             parameters.append(make_string_parameter("csv_path", csv_path))
         self.set_csv_player_parameters(parameters)
-        self.set_offline_logger_parameters([make_string_parameter("source_csv_path", csv_path)])
         self.set_rviz_visual_parameters([make_double_parameter("wall_x_offset", wall_x_offset)])
 
     def set_csv_player_parameters(self, parameters: list[ParameterMsg]) -> None:
@@ -139,16 +137,6 @@ class LogPlayerControlNode(Node):
         request.parameters = parameters
         future = self.rviz_visual_client.call_async(request)
         future.add_done_callback(lambda f: self._log_parameter_result("rviz_visual", f))
-
-    def set_offline_logger_parameters(self, parameters: list[ParameterMsg]) -> None:
-        if not parameters:
-            return
-        if not self.offline_logger_client.service_is_ready():
-            return
-        request = SetParameters.Request()
-        request.parameters = parameters
-        future = self.offline_logger_client.call_async(request)
-        future.add_done_callback(lambda f: self._log_parameter_result("offline_result_logger", f))
 
     def seek_ratio(self, ratio: float) -> None:
         self.set_csv_player_parameters([make_double_parameter("seek_ratio", ratio)])
@@ -258,12 +246,9 @@ class LogPlayerControlWindow(QMainWindow):
         if not self.ros_node.rviz_visual_client.service_is_ready():
             self.ros_node.rviz_visual_client.wait_for_service(timeout_sec=0.0)
             return
-        if not self.ros_node.offline_logger_client.service_is_ready():
-            self.ros_node.offline_logger_client.wait_for_service(timeout_sec=0.0)
-            return
         self.player_wait_timer.stop()
         self.ros_node.push_initial_state()
-        self.status_label.setText("Connected to csv_player, rviz_visual, and offline_result_logger")
+        self.status_label.setText("Connected to csv_player and rviz_visual")
 
     def on_browse(self) -> None:
         start_dir = str(self.log_root)
@@ -286,7 +271,6 @@ class LogPlayerControlWindow(QMainWindow):
             return
         self.file_edit.setText(csv_path)
         self.ros_node.set_csv_player_parameters([make_string_parameter("csv_path", csv_path)])
-        self.ros_node.set_offline_logger_parameters([make_string_parameter("source_csv_path", csv_path)])
         self.status_label.setText(f"Loading {csv_path}")
 
     def on_speed_changed(self, value: float) -> None:

@@ -30,7 +30,7 @@ cfg.k_tau_motor = 0.00569278844371417;
 % Match Crazyflie powerDistributionForceTorque() yawPart signs:
 % m1/m3 contribute negative tau_z, m2/m4 contribute positive tau_z.
 cfg.motor_dir = [-1.0, 1.0, -1.0, 1.0];
-cfg.ee_offset_body = [0.1; 0.0; 0.04];
+cfg.ee_offset_body = [0.08; 0.0; 0.04];
 cfg.Kf = 30.0;
 cfg.Ktau = 30.0;
 cfg.mob_alpha = 1.0;
@@ -39,10 +39,6 @@ cfg.KpTau = 10.9544511501;
 cfg.Ke = 900.0;
 cfg.epsilon_tau = 1.0e-6;
 cfg.observer_dt = 0.004;
-cfg.attitude_input_scale_rpy = [0.4, 1.5, 1.0];
-cfg.attitude_input_offset_rpy = [0.0, 0.12, 0.0];
-cfg.force_est_scale_xyz = [1.0, 1.0, 1.0];
-cfg.force_est_offset_xyz = [0.0, 0.0, 0.0];
 
 % Optional velocity LPF before the offline observer (empty = disabled)
 vel_lpf_cutoff_hz = [];
@@ -92,14 +88,8 @@ pose_xyz = [get1("pose_x"), get1("pose_y"), get1("pose_z")];
 % Use measured Euler angles as logged; Crazyflie pitch sign flips exist in
 % some command decoding paths, not in the attitude state itself.
 pose_rpy = [get1("pose_roll"), get1("pose_pitch"), unwrap(get1("pose_yaw"))];
-pose_rpy = local_apply_xyz_affine_rows( ...
-    pose_rpy, cfg.attitude_input_scale_rpy, cfg.attitude_input_offset_rpy);
 cmd_xyz = [get1("cmd_x"), get1("cmd_y"), get1("cmd_z")];
 att_des = deg2rad([get1("attDes_roll"), get1("attDes_pitch"), get1("attDes_yaw")]);
-% Apply the same attitude input calibration to both desired and measured
-% signals so the full downstream comparison stays in one synchronized frame.
-att_des = local_apply_xyz_affine_rows( ...
-    att_des, cfg.attitude_input_scale_rpy, cfg.attitude_input_offset_rpy);
 
 motor_thrust = [get1("f1"), get1("f2"), get1("f3"), get1("f4")];
 state_vel = [get1("stateVx"), get1("stateVy"), get1("stateVz")];
@@ -203,10 +193,8 @@ for k = 1:N
         local_assert_state_finite('cons_state', cons_state, k, j);
     end
 
-    mob_force_none_drone_off(k, :) = local_apply_xyz_affine( ...
-        pure_state.world_force_hat_ext.', cfg.force_est_scale_xyz, cfg.force_est_offset_xyz);
-    mob_force_res_drone_off(k, :) = local_apply_xyz_affine( ...
-        cons_state.world_force_hat_ext.', cfg.force_est_scale_xyz, cfg.force_est_offset_xyz);
+    mob_force_none_drone_off(k, :) = pure_state.world_force_hat_ext.';
+    mob_force_res_drone_off(k, :) = cons_state.world_force_hat_ext.';
     mob_force_base_drone_off(k, :) = cons_state.force_hat_base_world.';
     mob_torque_none_drone_off(k, :) = (r_bw * pure_state.body_torque_hat_ext).';
     mob_torque_res_drone_off(k, :) = (r_bw * cons_state.body_torque_hat_ext).';
@@ -454,26 +442,6 @@ function local_apply_cell_ylim(ax, ylim_cells, idx)
     end
 end
 
-function y = local_apply_xyz_affine(x_row, scale_xyz, offset_xyz)
-    y = x_row;
-    if numel(y) ~= 3
-        return;
-    end
-    y = reshape(y, 1, 3);
-    scale_xyz = reshape(scale_xyz, 1, 3);
-    offset_xyz = reshape(offset_xyz, 1, 3);
-    y = scale_xyz .* y + offset_xyz;
-end
-
-function y = local_apply_xyz_affine_rows(x_mat, scale_xyz, offset_xyz)
-    y = x_mat;
-    if size(y, 2) ~= 3
-        return;
-    end
-    scale_xyz = reshape(scale_xyz, 1, 3);
-    offset_xyz = reshape(offset_xyz, 1, 3);
-    y = y .* repmat(scale_xyz, size(y, 1), 1) + repmat(offset_xyz, size(y, 1), 1);
-end
 
 function alpha = local_lpf_alpha_from_cutoff_hz(dt, cutoff_hz)
     if ~(isfinite(dt) && dt > 0 && isfinite(cutoff_hz) && cutoff_hz > 0)

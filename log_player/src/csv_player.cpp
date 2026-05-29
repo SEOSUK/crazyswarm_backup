@@ -73,6 +73,7 @@ public:
       "csv_path", ""));
     start_offset_sec_ = declare_parameter<double>("start_offset_sec", 0.0);
     playback_rate_ = declare_parameter<double>("playback_rate", 1.0);
+    sample_hz_ = std::max(1e-6, declare_parameter<double>("sample_hz", 50.0));
     publish_topic_ = declare_parameter<std::string>("publish_topic", "/data_logging_msg");
     declare_parameter<double>("seek_time_sec", 0.0);
     declare_parameter<double>("seek_ratio", 0.0);
@@ -151,9 +152,12 @@ private:
 
     headerIndex_ = nextHeaderIndex;
 
+    const bool hasTimeColumn = headerIndex_.count("t_sec") > 0;
+
     std::string line;
     bool firstTimeSet = false;
     std::vector<Row> loadedRows;
+    size_t sampleIndex = 0;
     while (std::getline(file, line)) {
       if (line.empty()) {
         continue;
@@ -163,7 +167,8 @@ private:
         continue;
       }
 
-      const double rawTime = getValue(cells, "t_sec");
+      const double rawTime = hasTimeColumn ? getValue(cells, "t_sec") : (static_cast<double>(sampleIndex) / sample_hz_);
+      ++sampleIndex;
       if (!std::isfinite(rawTime)) {
         continue;
       }
@@ -213,6 +218,20 @@ private:
 
   std::vector<double> packRow(const std::vector<std::string> & cells) const
   {
+    const bool is_debug_layout = headerIndex_.count("normalEst_x") > 0 && headerIndex_.count("fwCmd_x") > 0;
+    if (is_debug_layout) {
+      std::vector<double> out;
+      out.reserve(cells.size());
+      for (const auto & cell : cells) {
+        try {
+          out.push_back(parseScalar(cell));
+        } catch (const std::exception &) {
+          out.push_back(std::numeric_limits<double>::quiet_NaN());
+        }
+      }
+      return out;
+    }
+
     const bool is_new_layout = headerIndex_.count("motor_f1") > 0 || headerIndex_.count("gyro_x") > 0;
     if (is_new_layout) {
       std::vector<double> out(52, std::numeric_limits<double>::quiet_NaN());
@@ -411,6 +430,15 @@ private:
           return result;
         }
         playback_rate_.store(nextRate);
+      } else if (parameter.get_name() == "sample_hz") {
+        const double nextSampleHz = parameter.as_double();
+        if (nextSampleHz <= 0.0) {
+          result.successful = false;
+          result.reason = "sample_hz must be greater than zero";
+          return result;
+        }
+        sample_hz_ = nextSampleHz;
+        shouldReload = true;
       } else if (parameter.get_name() == "seek_time_sec") {
         requestSeekByTime(parameter.as_double());
       } else if (parameter.get_name() == "seek_ratio") {
@@ -560,6 +588,7 @@ private:
   std::string csv_path_;
   std::string publish_topic_;
   double start_offset_sec_{0.0};
+  double sample_hz_{50.0};
   double firstTimeSec_{0.0};
 };
 

@@ -134,7 +134,7 @@ fprintf("[INFO] Using %d rows.\n", N);
 
 %% 4) Derived quantities
 set(groot,'defaultFigureRenderer','painters');
-ee_offset_body = [0.1; 0.0; 0.04];
+ee_offset_body = [0.08; 0.0; 0.04];
 position_numerical_velocity_lpf_cutoff_hz = 0.5;
 % Projection input velocity is generated here from position by numerical differentiation.
 position_numerical_velocity_world = differentiate_triplet_by_time(time, pose_xyz);

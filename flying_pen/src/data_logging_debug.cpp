@@ -3,6 +3,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 
 #include <crazyflie_interfaces/msg/log_data_generic.hpp>
@@ -23,6 +24,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <sstream>
 #include <string>
 
 using std::placeholders::_1;
@@ -55,6 +57,21 @@ static std::string now_mmddhhmm_debug()
 static inline double qnan_debug()
 {
   return std::numeric_limits<double>::quiet_NaN();
+}
+
+static std::string sanitize_filename_component_debug(const std::string & text)
+{
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    const bool ok =
+      (c >= '0' && c <= '9') ||
+      (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z') ||
+      c == '_' || c == '-' || c == '.';
+    out.push_back(ok ? c : '_');
+  }
+  return out;
 }
 
 class DataLoggingDebugNode : public rclcpp::Node
@@ -146,6 +163,9 @@ public:
       cf_ns_ + "/cf_mob_pure", 10, std::bind(&DataLoggingDebugNode::mobPureCallback, this, _1));
     sub_mob_res_final_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_mob_res_final", 10, std::bind(&DataLoggingDebugNode::mobResFinalCallback, this, _1));
+    sub_filename_tag_ = this->create_subscription<std_msgs::msg::String>(
+      "/flying_pen/debug_log_filename_tag", 10,
+      std::bind(&DataLoggingDebugNode::filenameTagCallback, this, _1));
 
     RCLCPP_INFO(get_logger(), "data_logging_debug node started");
   }
@@ -423,6 +443,60 @@ private:
     }
   }
 
+  void filenameTagCallback(const std_msgs::msg::String::SharedPtr msg)
+  {
+    if (!msg || msg->data.empty() || csv_path_.empty()) {
+      return;
+    }
+
+    const std::filesystem::path current_path(csv_path_);
+    const std::filesystem::path parent_dir = current_path.parent_path();
+    const std::string sanitized_tag = sanitize_filename_component_debug(msg->data);
+    if (sanitized_tag.empty()) {
+      RCLCPP_WARN(get_logger(), "Ignoring empty debug log filename tag");
+      return;
+    }
+
+    const std::string base_name = current_path.filename().string();
+    const std::string suffix = "_debug";
+    const std::size_t suffix_pos = base_name.find(suffix);
+    const std::string prefix =
+      (suffix_pos == std::string::npos) ? now_mmddhhmm_debug() : base_name.substr(0, suffix_pos);
+    const std::filesystem::path new_path =
+      parent_dir / (prefix + "_debug_" + sanitized_tag + ".csv");
+
+    if (new_path == current_path) {
+      return;
+    }
+
+    if (csv_.is_open()) {
+      csv_.flush();
+      csv_.close();
+    }
+
+    std::error_code ec;
+    std::filesystem::rename(current_path, new_path, ec);
+    if (ec) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Failed to rename debug CSV from %s to %s: %s",
+        current_path.string().c_str(),
+        new_path.string().c_str(),
+        ec.message().c_str());
+      csv_.open(csv_path_, std::ios::out | std::ios::app);
+      return;
+    }
+
+    csv_path_ = new_path.string();
+    csv_.open(csv_path_, std::ios::out | std::ios::app);
+    if (!csv_.is_open()) {
+      RCLCPP_ERROR(get_logger(), "Failed to reopen renamed CSV file: %s", csv_path_.c_str());
+      return;
+    }
+
+    RCLCPP_INFO(get_logger(), "Debug CSV renamed to: %s", csv_path_.c_str());
+  }
+
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr data_pub_;
 
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_pose_;
@@ -443,6 +517,7 @@ private:
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_debug_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_pure_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_mob_res_final_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_filename_tag_;
 
   std::string csv_dir_;
   std::string csv_path_;

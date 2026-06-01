@@ -273,8 +273,8 @@ private:
     else if (c == 'x')  { resetActiveCommand(); }
     else if (c == 'i')  { setPositionMode(crazyflie_interfaces::msg::PositionControl::MODE_VELOCITY); }
     else if (c == 'u')  { setPositionMode(crazyflie_interfaces::msg::PositionControl::MODE_POSITION); }
-    else if (c == 'f')  { setCommandReference(crazyflie_interfaces::msg::PositionControl::REFERENCE_DRONE); }
-    else if (c == 'g')  { setCommandReference(crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR); }
+    else if (c == 'f')  { publishKeyboardTrigger('f'); }
+    else if (c == 'g')  { status_msg_ = "runtime command reference switching disabled"; pushInputHistory("g : reference switching disabled"); }
     else if (c == 'n')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE); }
     else if (c == 'm')  { setTrajectoryMode(crazyflie_interfaces::msg::PositionControl::TRAJECTORY_1); }
     else if (c == 'j')  { force_des_ += force_delta_; publishPositionControl(); updateForceStatus(); pushInputHistory("j : force += tick"); }
@@ -612,9 +612,15 @@ private:
     if (key == 'o') {
       status_msg_ = "published 'o' to keyboard_input (ARM)";
       pushInputHistory("o : ARM (keyboard_input)");
-    } else {
+    } else if (key == 'p') {
       status_msg_ = "published 'p' to keyboard_input (DISARM)";
       pushInputHistory("p : DISARM (keyboard_input)");
+    } else if (key == 'f') {
+      status_msg_ = "published 'f' to keyboard_input (hover mass/com calibration)";
+      pushInputHistory("f : hover mass/com calibration");
+    } else {
+      status_msg_ = "published keyboard trigger";
+      pushInputHistory("keyboard trigger published");
     }
   }
 
@@ -778,9 +784,9 @@ private:
     clear();
 
     drawSepLine(ROW_USAGE_HEADER, "usage");
-    mvprintw(ROW_USAGE_1, 0, "position: w/s(x), a/d(y), e/q(z), z/c(yaw), x(hold/reset), i->velocity, f/g(ref)");
-    mvprintw(ROW_USAGE_2, 0, "velocity: w/s/a/d/e/q(v), x(zero vel), u->position, n(stop), m(run), f/g(ref)");
-    mvprintw(ROW_USAGE_3, 0, "force/bias: j/k/l (cmd_fx), r(zero bias), o/p arm/disarm, t quit");
+    mvprintw(ROW_USAGE_1, 0, "position: w/s(x), a/d(y), e/q(z), z/c(yaw), x(hold/reset), i->velocity");
+    mvprintw(ROW_USAGE_2, 0, "velocity: w/s/a/d/e/q(v), x(zero vel), u->position, n(stop), m(run)");
+    mvprintw(ROW_USAGE_3, 0, "force/bias: j/k/l (cmd_fx), r(zero bias), f(hover mass/com), o/p arm/disarm, t quit");
 
     drawSepLine(ROW_STATUS_HEADER, "status");
     mvprintw(ROW_STATUS_MODE, 0, "mode: ");

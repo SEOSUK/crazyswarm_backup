@@ -535,7 +535,7 @@ for i = 1:3
 end
 
 %% 7) Figure 1: MOB force compare / torque panel
-panel1_xlim = [25 75];                % e.g. [0 10]
+panel1_xlim = [10 40];                % e.g. [0 10]
 panel1_force_ylim = [-0.05 0.05];          % fallback for all MOB force subplots
 panel1_torque_ylim = [-0.05 0.05];         % fallback for all MOB torque subplots
 panel1_force_x_ylim = [-0.05 0.05];

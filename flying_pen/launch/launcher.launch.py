@@ -69,20 +69,6 @@ def launch_setup(context, *args, **kwargs):
         )
 
     actions.append(
-        TimerAction(
-            period=0.5,
-            actions=[
-                Node(
-                    package="crazyflie_examples",
-                    executable="su_interface",
-                    name="su_interface",
-                    output="screen",
-                )
-            ],
-        )
-    )
-
-    actions.append(
         ExecuteProcess(
             cmd=[
                 "ros2",

@@ -1,5 +1,6 @@
 rviz_visual:
   ros__parameters:
     topic: "/data_logging_msg_debug"
-    history_sample_period: 0.2
+    history_sample_period: 1.0
     history_duration: 30.0
+    history_frame_axis_scale: 0.05

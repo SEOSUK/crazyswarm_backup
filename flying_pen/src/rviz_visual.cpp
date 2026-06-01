@@ -2,15 +2,19 @@
 #include "std_msgs/msg/float64_multi_array.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "visualization_msgs/msg/marker.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2_ros/transform_broadcaster.h>
 
+#include <array>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
 #include <deque>
 #include <cmath>
+#include <optional>
+#include <vector>
 
 using namespace std::chrono_literals;
 
@@ -26,13 +30,23 @@ bool isFiniteVector(const Eigen::Vector3d & v)
 class RvizVisual : public rclcpp::Node
 {
 public:
+  struct HistorySample
+  {
+    int id{0};
+    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+    geometry_msgs::msg::Point origin;
+    geometry_msgs::msg::Quaternion orientation;
+  };
+
   RvizVisual()
   : Node("rviz_visual"),
     tf_broadcaster_(std::make_shared<tf2_ros::TransformBroadcaster>(this))
   {
     data_topic_ = this->declare_parameter<std::string>("topic", "/data_logging_msg_debug");
     history_sample_period_ = this->declare_parameter<double>("history_sample_period", 0.2);
+    history_publish_period_ = this->declare_parameter<double>("history_publish_period", 0.10);
     history_duration_ = this->declare_parameter<double>("history_duration", 30.0);
+    history_frame_axis_scale_ = this->declare_parameter<double>("history_frame_axis_scale", 0.3);
     ee_offset_ = declareOffsetParameter();
 
     auto qos = rclcpp::QoS(
@@ -53,6 +67,8 @@ public:
     vel_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/vel_marker", 10);
     wall_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/wall_marker", 10);
     ee_history_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/ee_trajectory_history", 10);
+    contact_history_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/rviz/contact_frame_history", 10);
 
     pos_.setZero();
     rpy_meas_.setZero();
@@ -121,6 +137,8 @@ private:
   {
     const auto stamp = get_clock()->now();
     publishWall(stamp);
+    pruneSmoothTrajectoryHistory(stamp);
+    const auto expired_history_ids = pruneFrameHistory(stamp);
 
     if (!pose_valid_) {
       publishTrajectoryHistory(stamp);
@@ -159,15 +177,8 @@ private:
     tf_ee.transform.rotation = tf_meas.transform.rotation;
     tf_broadcaster_->sendTransform(tf_ee);
 
-    geometry_msgs::msg::TransformStamped tf_normal;
-    tf_normal.header.stamp = stamp;
-    tf_normal.header.frame_id = "world";
-    tf_normal.child_frame_id = "normal_frame";
-    tf_normal.transform.translation.x = ee_pos.x();
-    tf_normal.transform.translation.y = ee_pos.y();
-    tf_normal.transform.translation.z = ee_pos.z();
-    tf_normal.transform.rotation = computeNormalFrameQuaternion();
-    tf_broadcaster_->sendTransform(tf_normal);
+    const auto normal_frame_axes = computeNormalFrameAxes();
+    const auto normal_frame_quat = makeQuaternionFromAxes(normal_frame_axes);
 
     geometry_msgs::msg::TransformStamped tf_cmd;
     tf_cmd.header.stamp = stamp;
@@ -218,8 +229,10 @@ private:
     publishArrow(normal_est_pub_, stamp, "world", "normal_estimation", 0, p0, normal_est_, 0.25, 0.02, 0.04, 0.06, 0.1f, 0.8f, 0.2f);
     publishArrow(acc_pub_, stamp, "world", "acceleration", 0, p0, world_acc_, 0.5, 0.015, 0.03, 0.05, 0.0f, 0.0f, 1.0f);
     publishArrow(vel_pub_, stamp, "world", "velocity", 0, p0, world_vel_, 1.0, 0.015, 0.03, 0.05, 1.0f, 0.8f, 0.0f);
-    pushTrajectorySample(ee_pos, stamp);
-    publishTrajectoryHistory(stamp);
+    pushSmoothTrajectorySample(ee_pos, stamp);
+    const auto new_history_sample = pushFrameHistorySample(ee_pos, normal_frame_quat, stamp);
+    publishFrameHistoryDelta(stamp, expired_history_ids, new_history_sample);
+    maybePublishTrajectoryHistory(stamp);
   }
 
   std::array<double, 3> declareOffsetParameter()
@@ -255,39 +268,59 @@ private:
       pos_[2] + offset_world.z());
   }
 
-  geometry_msgs::msg::Quaternion computeNormalFrameQuaternion() const
+  struct FrameAxes
   {
-    geometry_msgs::msg::Quaternion q_msg;
-    q_msg.w = 1.0;
+    Eigen::Vector3d x{Eigen::Vector3d::UnitX()};
+    Eigen::Vector3d y{Eigen::Vector3d::UnitY()};
+    Eigen::Vector3d z{Eigen::Vector3d::UnitZ()};
+    bool valid{false};
+  };
 
-    Eigen::Vector3d x_axis = -normal_est_;
+  FrameAxes computeNormalFrameAxes() const
+  {
+    FrameAxes axes;
+
+    Eigen::Vector3d x_axis = normal_est_;
     const double x_norm = x_axis.norm();
     if (x_norm < 1e-6) {
-      return q_msg;
+      return axes;
     }
     x_axis /= x_norm;
 
-    Eigen::Vector3d alpha_ref(0.0, 0.0, 1.0);
-    Eigen::Vector3d y_axis = alpha_ref.cross(x_axis);
-    if (y_axis.norm() < 1e-6) {
-      y_axis = Eigen::Vector3d(0.0, 1.0, 0.0).cross(x_axis);
+    Eigen::Vector3d t1_axis = Eigen::Vector3d::UnitZ().cross(x_axis);
+    if (t1_axis.norm() < 1e-6) {
+      t1_axis = Eigen::Vector3d::UnitY().cross(x_axis);
     }
-    if (y_axis.norm() < 1e-6) {
-      return q_msg;
+    if (t1_axis.norm() < 1e-6) {
+      return axes;
     }
-    y_axis.normalize();
+    t1_axis.normalize();
 
-    Eigen::Vector3d z_axis = x_axis.cross(y_axis);
-    if (z_axis.norm() < 1e-6) {
+    Eigen::Vector3d t2_axis = x_axis.cross(t1_axis);
+    if (t2_axis.norm() < 1e-6) {
+      return axes;
+    }
+    t2_axis.normalize();
+
+    axes.x = x_axis;
+    axes.y = t1_axis;
+    axes.z = t2_axis;
+    axes.valid = true;
+    return axes;
+  }
+
+  geometry_msgs::msg::Quaternion makeQuaternionFromAxes(const FrameAxes & axes) const
+  {
+    geometry_msgs::msg::Quaternion q_msg;
+    q_msg.w = 1.0;
+    if (!axes.valid) {
       return q_msg;
     }
-    z_axis.normalize();
 
     Eigen::Matrix3d rot;
-    rot.col(0) = x_axis;
-    rot.col(1) = y_axis;
-    rot.col(2) = z_axis;
-
+    rot.col(0) = axes.x;
+    rot.col(1) = axes.y;
+    rot.col(2) = axes.z;
     const Eigen::Quaterniond q(rot);
     q_msg.x = q.x();
     q_msg.y = q.y();
@@ -296,27 +329,36 @@ private:
     return q_msg;
   }
 
-  void pushTrajectorySample(const Eigen::Vector3d & ee_pos, const rclcpp::Time & stamp)
+  void pruneSmoothTrajectoryHistory(const rclcpp::Time & stamp)
   {
-    if (!isFiniteVector(ee_pos)) {
-      return;
-    }
-
-    const double sample_period = std::max(1e-3, history_sample_period_);
-    const double keep_duration = std::max(sample_period, history_duration_);
-
-    while (!trajectory_history_.empty()) {
-      const double age = (stamp - trajectory_history_.front().stamp).seconds();
+    const double keep_duration = std::max(1e-3, history_duration_);
+    while (!smooth_trajectory_history_.empty()) {
+      const double age = (stamp - smooth_trajectory_history_.front().stamp).seconds();
       if (age <= keep_duration) {
         break;
       }
-      trajectory_history_.pop_front();
+      smooth_trajectory_history_.pop_front();
     }
+  }
 
-    if (
-      last_history_sample_time_.nanoseconds() > 0 &&
-      (stamp - last_history_sample_time_).seconds() < sample_period)
-    {
+  std::vector<int> pruneFrameHistory(const rclcpp::Time & stamp)
+  {
+    std::vector<int> expired_ids;
+    const double keep_duration = std::max(1e-3, history_duration_);
+    while (!frame_history_.empty()) {
+      const double age = (stamp - frame_history_.front().stamp).seconds();
+      if (age <= keep_duration) {
+        break;
+      }
+      expired_ids.push_back(frame_history_.front().id);
+      frame_history_.pop_front();
+    }
+    return expired_ids;
+  }
+
+  void pushSmoothTrajectorySample(const Eigen::Vector3d & ee_pos, const rclcpp::Time & stamp)
+  {
+    if (!isFiniteVector(ee_pos)) {
       return;
     }
 
@@ -324,34 +366,211 @@ private:
     sample.x = ee_pos.x();
     sample.y = ee_pos.y();
     sample.z = ee_pos.z();
-    trajectory_history_.push_back(TrajectorySample{stamp, sample});
-    last_history_sample_time_ = stamp;
+    smooth_trajectory_history_.push_back(TrajectorySample{stamp, sample});
   }
 
-  void publishTrajectoryHistory(const rclcpp::Time & stamp)
+  std::optional<HistorySample> pushFrameHistorySample(
+    const Eigen::Vector3d & ee_pos,
+    const geometry_msgs::msg::Quaternion & frame_quat,
+    const rclcpp::Time & stamp)
+  {
+    if (
+      !isFiniteVector(ee_pos) ||
+      !std::isfinite(frame_quat.x) ||
+      !std::isfinite(frame_quat.y) ||
+      !std::isfinite(frame_quat.z) ||
+      !std::isfinite(frame_quat.w))
+    {
+      return std::nullopt;
+    }
+
+    const double sample_period = std::max(1e-3, history_sample_period_);
+
+    if (
+      last_history_sample_time_.nanoseconds() > 0 &&
+      (stamp - last_history_sample_time_).seconds() < sample_period)
+    {
+      return std::nullopt;
+    }
+
+    HistorySample sample;
+    sample.id = next_history_sample_id_++;
+    sample.stamp = stamp;
+    sample.origin.x = ee_pos.x();
+    sample.origin.y = ee_pos.y();
+    sample.origin.z = ee_pos.z();
+    sample.orientation = frame_quat;
+    frame_history_.push_back(sample);
+    last_history_sample_time_ = stamp;
+    return sample;
+  }
+
+  visualization_msgs::msg::Marker makeDeleteMarker(
+    const std::string & ns,
+    int id,
+    const rclcpp::Time & stamp) const
   {
     visualization_msgs::msg::Marker marker;
     marker.header.stamp = stamp;
     marker.header.frame_id = "world";
-    marker.ns = "ee_trajectory_history";
-    marker.id = 1000;
-    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    marker.action = trajectory_history_.size() >= 2 ?
-      visualization_msgs::msg::Marker::ADD :
-      visualization_msgs::msg::Marker::DELETE;
-    marker.pose.orientation.w = 1.0;
-    marker.scale.x = 0.01;
-    marker.color.a = 0.65f;
-    marker.color.r = 0.22f;
-    marker.color.g = 0.22f;
-    marker.color.b = 0.26f;
-    marker.lifetime = rclcpp::Duration(0, 0);
+    marker.ns = ns;
+    marker.id = id;
+    marker.action = visualization_msgs::msg::Marker::DELETE;
+    return marker;
+  }
 
-    for (const auto & sample : trajectory_history_) {
-      marker.points.push_back(sample.point);
+  visualization_msgs::msg::Marker makeHistoryFrameLineMarker(
+    const rclcpp::Time & stamp,
+    const std::string & ns,
+    int id) const
+  {
+    visualization_msgs::msg::Marker marker;
+    marker.header.stamp = stamp;
+    marker.header.frame_id = "world";
+    marker.ns = ns;
+    marker.id = id;
+    marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = 0.004;
+    marker.lifetime = rclcpp::Duration(0, 0);
+    return marker;
+  }
+
+  visualization_msgs::msg::MarkerArray makeContactHistoryMarkerArray(const rclcpp::Time & stamp)
+  {
+    visualization_msgs::msg::MarkerArray out;
+    if (smooth_trajectory_history_.size() >= 2) {
+      auto traj_marker = makeHistoryFrameLineMarker(stamp, "ee_trajectory_history", 1000);
+      traj_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+      traj_marker.scale.x = 0.010;
+      traj_marker.color.a = 0.65f;
+      traj_marker.color.r = 0.22f;
+      traj_marker.color.g = 0.22f;
+      traj_marker.color.b = 0.26f;
+      for (const auto & sample : smooth_trajectory_history_) {
+        traj_marker.points.push_back(sample.point);
+      }
+      out.markers.push_back(traj_marker);
+    } else {
+      out.markers.push_back(makeDeleteMarker("ee_trajectory_history", 1000, stamp));
+    }
+    return out;
+  }
+
+  visualization_msgs::msg::MarkerArray makeDeleteFrameMarkers(
+    const rclcpp::Time & stamp,
+    const std::vector<int> & expired_ids) const
+  {
+    visualization_msgs::msg::MarkerArray out;
+    for (const int id : expired_ids) {
+      out.markers.push_back(makeDeleteMarker("contact_frame_history_x_segment", id, stamp));
+      out.markers.push_back(makeDeleteMarker("contact_frame_history_y_segment", id, stamp));
+      out.markers.push_back(makeDeleteMarker("contact_frame_history_z_segment", id, stamp));
+    }
+    return out;
+  }
+
+  visualization_msgs::msg::MarkerArray makeAddFrameMarkers(
+    const rclcpp::Time & stamp,
+    const HistorySample & sample) const
+  {
+    visualization_msgs::msg::MarkerArray out;
+
+    const double axis_len = std::max(1e-3, history_frame_axis_scale_);
+    tf2::Quaternion q(
+      sample.orientation.x,
+      sample.orientation.y,
+      sample.orientation.z,
+      sample.orientation.w);
+    q.normalize();
+    tf2::Matrix3x3 rot(q);
+
+    geometry_msgs::msg::Point px = sample.origin;
+    geometry_msgs::msg::Point py = sample.origin;
+    geometry_msgs::msg::Point pz = sample.origin;
+
+    const tf2::Vector3 ex = rot.getColumn(0);
+    const tf2::Vector3 ey = rot.getColumn(1);
+    const tf2::Vector3 ez = rot.getColumn(2);
+
+    px.x += 2.0 * axis_len * ex.x();
+    px.y += 2.0 * axis_len * ex.y();
+    px.z += 2.0 * axis_len * ex.z();
+
+    py.x += axis_len * ey.x();
+    py.y += axis_len * ey.y();
+    py.z += axis_len * ey.z();
+
+    pz.x += axis_len * ez.x();
+    pz.y += axis_len * ez.y();
+    pz.z += axis_len * ez.z();
+
+    auto x_marker = makeHistoryFrameLineMarker(stamp, "contact_frame_history_x_segment", sample.id);
+    auto y_marker = makeHistoryFrameLineMarker(stamp, "contact_frame_history_y_segment", sample.id);
+    auto z_marker = makeHistoryFrameLineMarker(stamp, "contact_frame_history_z_segment", sample.id);
+
+    x_marker.scale.x = 0.0045;
+    x_marker.color.a = 0.9f;
+    x_marker.color.r = 1.0f;
+    x_marker.color.g = 0.2f;
+    x_marker.color.b = 0.2f;
+    x_marker.points.push_back(sample.origin);
+    x_marker.points.push_back(px);
+
+    y_marker.scale.x = 0.0035;
+    y_marker.color.a = 0.8f;
+    y_marker.color.r = 0.2f;
+    y_marker.color.g = 1.0f;
+    y_marker.color.b = 0.2f;
+    y_marker.points.push_back(sample.origin);
+    y_marker.points.push_back(py);
+
+    z_marker.scale.x = 0.0035;
+    z_marker.color.a = 0.8f;
+    z_marker.color.r = 0.2f;
+    z_marker.color.g = 0.4f;
+    z_marker.color.b = 1.0f;
+    z_marker.points.push_back(sample.origin);
+    z_marker.points.push_back(pz);
+
+    out.markers.push_back(x_marker);
+    out.markers.push_back(y_marker);
+    out.markers.push_back(z_marker);
+    return out;
+  }
+
+  void publishFrameHistoryDelta(
+    const rclcpp::Time & stamp,
+    const std::vector<int> & expired_ids,
+    const std::optional<HistorySample> & new_sample)
+  {
+    if (!expired_ids.empty()) {
+      contact_history_pub_->publish(makeDeleteFrameMarkers(stamp, expired_ids));
+    }
+    if (new_sample.has_value()) {
+      contact_history_pub_->publish(makeAddFrameMarkers(stamp, *new_sample));
+    }
+  }
+
+  void publishTrajectoryHistory(const rclcpp::Time & stamp)
+  {
+    ee_history_pub_->publish(makeDeleteMarker("ee_trajectory_history", 1000, stamp));
+    contact_history_pub_->publish(makeContactHistoryMarkerArray(stamp));
+  }
+
+  void maybePublishTrajectoryHistory(const rclcpp::Time & stamp)
+  {
+    const double publish_period = std::max(1e-3, history_publish_period_);
+    if (
+      last_history_publish_time_.nanoseconds() > 0 &&
+      (stamp - last_history_publish_time_).seconds() < publish_period)
+    {
+      return;
     }
 
-    ee_history_pub_->publish(marker);
+    publishTrajectoryHistory(stamp);
+    last_history_publish_time_ = stamp;
   }
 
   void publishArrow(
@@ -471,6 +690,7 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr vel_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr wall_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr ee_history_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr contact_history_pub_;
 
   Eigen::Vector3d pos_;
   Eigen::Vector3d rpy_meas_;
@@ -485,9 +705,14 @@ private:
   std::array<double, 3> ee_offset_;
   std::string data_topic_;
   double history_sample_period_{0.2};
+  double history_publish_period_{0.10};
   double history_duration_{30.0};
+  double history_frame_axis_scale_{0.3};
+  int next_history_sample_id_{0};
   rclcpp::Time last_history_sample_time_{0, 0, RCL_ROS_TIME};
-  std::deque<TrajectorySample> trajectory_history_;
+  rclcpp::Time last_history_publish_time_{0, 0, RCL_ROS_TIME};
+  std::deque<TrajectorySample> smooth_trajectory_history_;
+  std::deque<HistorySample> frame_history_;
   bool pose_valid_{false};
 };
 

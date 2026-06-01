@@ -1,6 +1,6 @@
 csv_playback:
   ros__parameters:
-    launch_rviz: true
+    launch_rviz: false
     start_offset_sec: 0.0
     playback_rate: 1.0
     sample_hz: 50.0

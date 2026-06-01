@@ -25,7 +25,7 @@ def generate_launch_description():
         robot_description = f.read()
 
     csv_cfg = cfg.get("csv_playback", {}).get("ros__parameters", {})
-    launch_rviz = bool(csv_cfg.get("launch_rviz", True))
+    launch_rviz = bool(csv_cfg.get("launch_rviz", False))
     su_wrench_cfg = (
         shared_su_cfg.get("robot_types", {})
         .get("cf21", {})

@@ -109,7 +109,10 @@ public:
   // 83     : normal_velocity_leakage [-], 1 Hz LPF n_hat^T v_EE / (|v_EE| + 1e-6)
   // 84     : stabilizer loop elapsed time [us]
   // 85     : stabilizer loop elapsed time max since boot [us]
-  static constexpr int kDataLen = 86;
+  // 86     : alpha_frame [-], tangential command gating factor
+  // 87     : t1_cmd_des [m/s], gated desired tangential command in t1
+  // 88     : t2_cmd_des [m/s], gated desired tangential command in t2
+  static constexpr int kDataLen = 89;
 
   DataLoggingDebugNode()
   : Node("data_logging_debug")
@@ -162,6 +165,8 @@ public:
       cf_ns_ + "/cf_su_normal_metrics", 10, std::bind(&DataLoggingDebugNode::normalMetricsCallback, this, _1));
     sub_stabilizer_timing_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_stabilizer_timing", 10, std::bind(&DataLoggingDebugNode::stabilizerTimingCallback, this, _1));
+    sub_alpha_frame_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_su_alpha_frame", 10, std::bind(&DataLoggingDebugNode::alphaFrameCallback, this, _1));
     sub_imu_raw_pair_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_imu_raw_pair", 10, std::bind(&DataLoggingDebugNode::imuRawPairCallback, this, _1));
     sub_vel_att_des_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
@@ -227,6 +232,9 @@ public:
     out.data.push_back(normal_velocity_leakage_);
     out.data.push_back(stabilizer_loop_dt_us_);
     out.data.push_back(stabilizer_loop_dt_us_max_);
+    out.data.push_back(alpha_frame_);
+    out.data.push_back(t1_cmd_des_);
+    out.data.push_back(t2_cmd_des_);
 
     if (out.data.size() != static_cast<size_t>(kDataLen)) {
       out.data.resize(kDataLen, qnan_debug());
@@ -302,7 +310,8 @@ private:
       << "normalEst_x,normalEst_y,normalEst_z,"
       << "eeVelUsed_x,eeVelUsed_y,eeVelUsed_z,"
       << "omega_n,normalVelocityLeakage,"
-      << "loopDtUs,loopDtUsMax\n";
+      << "loopDtUs,loopDtUsMax,"
+      << "alphaFrame,t1CmdDes,t2CmdDes\n";
     csv_.flush();
   }
 
@@ -397,6 +406,14 @@ private:
     if (msg->values.size() >= 2) {
       stabilizer_loop_dt_us_ = msg->values[0];
       stabilizer_loop_dt_us_max_ = msg->values[1];
+    }
+  }
+  void alphaFrameCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (msg->values.size() >= 3) {
+      alpha_frame_ = msg->values[0];
+      t1_cmd_des_ = msg->values[1];
+      t2_cmd_des_ = msg->values[2];
     }
   }
   void imuRawPairCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
@@ -548,6 +565,7 @@ private:
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_normal_debug_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_normal_metrics_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_stabilizer_timing_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_alpha_frame_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_imu_raw_pair_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_vel_att_des_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_debug_;
@@ -596,6 +614,9 @@ private:
   double normal_velocity_leakage_ = qnan_debug();
   double stabilizer_loop_dt_us_ = qnan_debug();
   double stabilizer_loop_dt_us_max_ = qnan_debug();
+  double alpha_frame_ = qnan_debug();
+  double t1_cmd_des_ = qnan_debug();
+  double t2_cmd_des_ = qnan_debug();
   double force_desired_ = qnan_debug();
 };
 

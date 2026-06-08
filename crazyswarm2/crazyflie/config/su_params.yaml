@@ -23,6 +23,9 @@ robot_types:
         preloadGv: 0.0  # effective gain from normal velocity leakage to command
         preloadNu: 0.3  # [m/s], symmetric saturation bound for normal velocity command
 
+        alphaMin: 0.15  # [0..1], minimum alpha_frame for tangential velocity command gating
+        alphaBar: 0.15  # [+] omega_n bar, [-] normal_velocity_leakage bar, 0 disables alpha_frame gating
+
         normBeta: 2.0  # [1/s] beta ≈ 2*pi*f_c, decay rate of the normal-axis memory matrix
         normEpsG: 0.0005  # [m^2/s^2], velocity-projection regularization epsilon_g
         normEpsF: 0.015  # [N], minimum force evidence norm epsilon_f

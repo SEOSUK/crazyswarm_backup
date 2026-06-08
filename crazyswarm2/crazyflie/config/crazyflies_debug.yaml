@@ -50,6 +50,9 @@ robot_types:
         cf_su_normal_metrics:
           frequency: 20
           vars: [suPosRef.vEeX, suPosRef.vEeY, suPosRef.vEeZ, suPosRef.omgN, suPosRef.nVelLeak]
+        cf_su_alpha_frame:
+          frequency: 20
+          vars: [suPosRef.alphaFrm, suPosRef.t1CmdDes, suPosRef.t2CmdDes]
         vel_att_des:
           frequency: 10
           vars: [posCtl.targetVX, posCtl.targetVY, posCtl.targetVZ, controller.roll, controller.pitch, controller.yaw]

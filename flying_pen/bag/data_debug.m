@@ -119,6 +119,9 @@ omega_n_logged = get1("omega_n");
 normal_velocity_leakage_logged = get1("normalVelocityLeakage");
 stabilizer_loop_dt_us = get1("loopDtUs");
 stabilizer_loop_dt_us_max = get1("loopDtUsMax");
+alpha_frame_logged = get1("alphaFrame");
+t1_cmd_des_logged = get1("t1CmdDes");
+t2_cmd_des_logged = get1("t2CmdDes");
 force_desired = get1("forceDesired");
 
 valid = isfinite(time);
@@ -155,6 +158,9 @@ omega_n_logged = omega_n_logged(valid);
 normal_velocity_leakage_logged = normal_velocity_leakage_logged(valid);
 stabilizer_loop_dt_us = stabilizer_loop_dt_us(valid);
 stabilizer_loop_dt_us_max = stabilizer_loop_dt_us_max(valid);
+alpha_frame_logged = alpha_frame_logged(valid);
+t1_cmd_des_logged = t1_cmd_des_logged(valid);
+t2_cmd_des_logged = t2_cmd_des_logged(valid);
 
 N = numel(time);
 fprintf("[INFO] Using %d rows.\n", N);
@@ -206,13 +212,18 @@ normal_est_xy = normal_est_logged;
 normal_est_xy(:,3) = 0.0;
 normal_est_xy = local_normalize_rows(normal_est_xy);
 [normal_frame_t1, normal_frame_t2] = local_compute_normal_frame_tangents(normal_est_logged);
-% Use raw keyboard-driven cmd_position channels directly. In velocity mode,
-% a/d and e/q update cmd_xyz_yaw_(y/z), so these are the closest logged
-% representation of operator step inputs. Only the measured EE velocity is
-% interpreted in the estimated normal frame.
-contact_t1_cmd = cmd_xyz(:,2);
+% Prefer firmware-logged gated tangential commands. Fall back to raw
+% cmd_position tangential channels for older CSV files that do not yet log
+% alpha_frame * t1/t2 desired commands.
+contact_t1_cmd = t1_cmd_des_logged;
+if ~any(isfinite(contact_t1_cmd))
+    contact_t1_cmd = cmd_xyz(:,2);
+end
 contact_t1_meas = local_project_rows(ee_vel_used_world, normal_frame_t1);
-contact_t2_cmd = cmd_xyz(:,3);
+contact_t2_cmd = t2_cmd_des_logged;
+if ~any(isfinite(contact_t2_cmd))
+    contact_t2_cmd = cmd_xyz(:,3);
+end
 contact_t2_meas = local_project_rows(ee_vel_used_world, normal_frame_t2);
 
 hover_mask = isfinite(sum_thrust) & sum_thrust > 0.6 * mg_total & sum_thrust < 1.4 * mg_total;
@@ -1172,16 +1183,13 @@ function local_plot_ee_normal_xy(ax, time, ee_pos, normal_xy, xlim_time)
     if numel(time_valid) >= 2
         cmap = turbo(256);
         cdata = linspace(0.0, 1.0, size(ee_valid,1));
-        surface(ax, ...
+        hTraj = surface(ax, ...
             [ee_valid(:,1), ee_valid(:,1)], ...
             [ee_valid(:,2), ee_valid(:,2)], ...
             zeros(size(ee_valid,1), 2), ...
             [cdata(:), cdata(:)], ...
-            'FaceColor', 'none', 'EdgeColor', 'interp', 'LineWidth', 2.0);
-        marker_idx = round(linspace(1, size(ee_valid,1), min(8, size(ee_valid,1))));
-        marker_idx = unique(marker_idx);
-        scatter(ax, ee_valid(marker_idx,1), ee_valid(marker_idx,2), 16, cdata(marker_idx), ...
-            'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 0.3);
+            'FaceColor', 'none', 'EdgeColor', 'interp', 'LineWidth', 2.0, ...
+            'PickableParts', 'all', 'ButtonDownFcn', @local_handle_ee_xy_click);
         scatter(ax, ee_valid(1,1), ee_valid(1,2), 42, cmap(1,:), 'filled', 'MarkerEdgeColor', 'k');
         scatter(ax, ee_valid(end,1), ee_valid(end,2), 42, cmap(end,:), 'filled', 'MarkerEdgeColor', 'k');
         colormap(ax, cmap);
@@ -1190,6 +1198,11 @@ function local_plot_ee_normal_xy(ax, time, ee_pos, normal_xy, xlim_time)
         cb.Ticks = linspace(0, 1, 5);
         cb.TickLabels = compose('%.1f', linspace(time_valid(1), time_valid(end), 5));
         caxis(ax, [0 1]);
+        ax.UserData.ee_xy_time = time_valid;
+        ax.UserData.ee_xy_pos = ee_valid;
+        ax.UserData.ee_xy_cdata = cdata(:);
+        ax.UserData.ee_xy_cmap = cmap;
+        ax.UserData.ee_xy_title = 'Normal estimation and EE trajectory (XY plane)';
     else
         plot(ax, ee_valid(:,1), ee_valid(:,2), 'LineWidth', 1.6, 'Color', [0.0000 0.4470 0.7410]);
     end
@@ -1203,7 +1216,42 @@ function local_plot_ee_normal_xy(ax, time, ee_pos, normal_xy, xlim_time)
             'Color', [0.8500 0.3250 0.0980], 'LineWidth', 1.0, 'MaxHeadSize', 1.5);
     end
 
-    legend(ax, {'EE trajectory', 'time markers', 'start', 'end', 'normal est (XY proj)'}, 'Location', 'best');
+    legend(ax, {'EE trajectory', 'start', 'end', 'normal est (XY proj)'}, 'Location', 'best');
+end
+
+function local_handle_ee_xy_click(src, ~)
+    ax = ancestor(src, 'axes');
+    if isempty(ax) || ~isfield(ax.UserData, 'ee_xy_pos') || ~isfield(ax.UserData, 'ee_xy_time')
+        return;
+    end
+
+    cp = ax.CurrentPoint;
+    click_xy = cp(1, 1:2);
+    ee_pos = ax.UserData.ee_xy_pos;
+    ee_time = ax.UserData.ee_xy_time;
+    cdata = ax.UserData.ee_xy_cdata;
+    cmap = ax.UserData.ee_xy_cmap;
+
+    diff_xy = ee_pos(:,1:2) - click_xy;
+    [~, idx] = min(sum(diff_xy.^2, 2, 'omitnan'));
+    if isempty(idx) || ~isfinite(idx)
+        return;
+    end
+
+    delete(findobj(ax, 'Tag', 'ee_xy_selected_point'));
+    delete(findobj(ax, 'Tag', 'ee_xy_selected_text'));
+
+    color_idx = max(1, min(size(cmap, 1), 1 + round(cdata(idx) * (size(cmap,1) - 1))));
+    selected_color = cmap(color_idx, :);
+    scatter(ax, ee_pos(idx,1), ee_pos(idx,2), 80, selected_color, ...
+        'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1.2, 'Tag', 'ee_xy_selected_point');
+    text(ax, ee_pos(idx,1), ee_pos(idx,2), sprintf('  t=%.2fs', ee_time(idx)), ...
+        'Color', [0.1 0.1 0.1], 'FontWeight', 'bold', 'VerticalAlignment', 'bottom', ...
+        'Tag', 'ee_xy_selected_text');
+
+    if isfield(ax.UserData, 'ee_xy_title')
+        title(ax, sprintf('%s | selected t = %.2f s', ax.UserData.ee_xy_title, ee_time(idx)));
+    end
 end
 
 function [t1_rows, t2_rows] = local_compute_normal_frame_tangents(normal_rows)

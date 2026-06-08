@@ -123,9 +123,9 @@ robot_types:
         posZFiltEn: 1 # Default: 1, Z position PID D-term LPF enable
         posZFiltCut: 20.0 # Default: 20.0 Hz, Z position PID D-term LPF cutoff
       velCtlPid:
-        vxKp: 14.0 # Default: 25.0
-        vyKp: 14.0 # Default: 25.0
-        vzKp: 20.0 # Default: 25.0
+        vxKp: 25.0 # Default: 25.0
+        vyKp: 25.0 # Default: 25.0
+        vzKp: 25.0 # Default: 25.0
         vxKi: 0. # Default: 1.0
         vyKi: 0. # Default: 1.0
         vzKi: 7.0 # Default: 15.0
@@ -165,14 +165,14 @@ robot_types:
         yaw_ki: 20.0 # Default: 16.7
         roll_kd: 2.5 # Default: 2.5
         pitch_kd: 3.5 # Default: 2.5
-        yaw_kd: 13.5 # Default: 0.0
+        yaw_kd: 3.5 # Default: 0.0
         roll_kff: 0.0 # Default: 0.0
         pitch_kff: 0.0 # Default: 0.0
         yaw_kff: 0.0 # Default: 0.0
         rateFiltEn: 1 # Default: 0, rate PID D-term LPF enable
-        omxFiltCut: 60.0 # Default: 30.0 Hz, roll-rate PID D-term LPF cutoff
-        omyFiltCut: 60.0 # Default: 30.0 Hz, pitch-rate PID D-term LPF cutoff
-        omzFiltCut: 60.0 # Default: 30.0 Hz, yaw-rate PID D-term LPF cutoff
+        omxFiltCut: 30.0 # Default: 30.0 Hz, roll-rate PID D-term LPF cutoff
+        omyFiltCut: 30.0 # Default: 30.0 Hz, pitch-rate PID D-term LPF cutoff
+        omzFiltCut: 30.0 # Default: 30.0 Hz, yaw-rate PID D-term LPF cutoff
         
     broadcasts:
       num_repeats: 1 # number of times broadcast commands are repeated

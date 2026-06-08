@@ -194,6 +194,16 @@ force_cmd_offset_window_s = [100.5 112.3];
 force_cmd_offset_value = 0.02;
 force_cmd_offset_mask = time >= force_cmd_offset_window_s(1) & time <= force_cmd_offset_window_s(2);
 force_desired_plot(force_cmd_offset_mask) = force_desired_plot(force_cmd_offset_mask) + force_cmd_offset_value;
+ee_offset_body = [0.1, 0.0, 0.04];
+ee_pos = local_compute_ee_position_world(pose_xyz, pose_rpy, ee_offset_body);
+normal_est_xy = normal_est_logged;
+normal_est_xy(:,3) = 0.0;
+normal_est_xy = local_normalize_rows(normal_est_xy);
+[normal_frame_t1, normal_frame_t2] = local_compute_normal_frame_tangents(normal_est_logged);
+contact_t1_cmd = local_project_rows(vel_des, normal_frame_t1);
+contact_t1_meas = local_project_rows(state_vel, normal_frame_t1);
+contact_t2_cmd = local_project_rows(vel_des, normal_frame_t2);
+contact_t2_meas = local_project_rows(state_vel, normal_frame_t2);
 
 hover_mask = isfinite(sum_thrust) & sum_thrust > 0.6 * mg_total & sum_thrust < 1.4 * mg_total;
 if nnz(hover_mask) < 10
@@ -445,15 +455,83 @@ elseif ~isempty(summary_xlim)
     xlim(summary_xlim);
 end
 
+%% 5.7) Figure 0: contact-frame overview / normal + EE top view / MOB pure vs consistency
+panel0_xlim = [37 170];
+panel0_force_ylim = [-0.02 0.12];
+panel0_t1_ylim = [-0.35 0.35];
+panel0_t2_ylim = [-0.35 0.35];
+panel0_mob_ylim = [-0.08 0.08];
+
+f0 = figure('Name', 'Contact / Normal / MOB Overview', 'NumberTitle', 'off', ...
+    'Color', 'w', 'Units', 'normalized', 'Position', [0.05 0.08 0.92 0.78]);
+
+p0_left = uipanel('Parent', f0, 'Units', 'normalized', 'Position', [0.02 0.08 0.43 0.86], ...
+    'BackgroundColor', 'w', 'BorderType', 'none');
+tl0_left = tiledlayout(p0_left, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+ax0_force = nexttile(tl0_left);
+plot(ax0_force, time, force_desired_plot, '--', 'LineWidth', 1.25, 'Color', cmd_color); hold(ax0_force, 'on');
+plot(ax0_force, time, force_measured_x_for_control, 'LineWidth', 1.2, 'Color', meas_color);
+grid(ax0_force, 'on');
+xlabel(ax0_force, 'time [s]');
+ylabel(ax0_force, '[N]');
+title(ax0_force, 'Force desired vs measured');
+legend(ax0_force, {'force desired', 'measured = -fHatW_x'}, 'Location', 'best');
+xlim(ax0_force, panel0_xlim);
+ylim(ax0_force, panel0_force_ylim);
+
+ax0_t1 = nexttile(tl0_left);
+plot(ax0_t1, time, contact_t1_cmd, '--', 'LineWidth', 1.25, 'Color', cmd_color); hold(ax0_t1, 'on');
+plot(ax0_t1, time, contact_t1_meas, 'LineWidth', 1.2, 'Color', meas_color);
+grid(ax0_t1, 'on');
+xlabel(ax0_t1, 'time [s]');
+ylabel(ax0_t1, '[m/s]');
+title(ax0_t1, 't1 frame velocity cmd vs measured');
+legend(ax0_t1, {'cmd', 'measured'}, 'Location', 'best');
+xlim(ax0_t1, panel0_xlim);
+ylim(ax0_t1, panel0_t1_ylim);
+
+ax0_t2 = nexttile(tl0_left);
+plot(ax0_t2, time, contact_t2_cmd, '--', 'LineWidth', 1.25, 'Color', cmd_color); hold(ax0_t2, 'on');
+plot(ax0_t2, time, contact_t2_meas, 'LineWidth', 1.2, 'Color', meas_color);
+grid(ax0_t2, 'on');
+xlabel(ax0_t2, 'time [s]');
+ylabel(ax0_t2, '[m/s]');
+title(ax0_t2, 't2 frame velocity cmd vs measured');
+legend(ax0_t2, {'cmd', 'measured'}, 'Location', 'best');
+xlim(ax0_t2, panel0_xlim);
+ylim(ax0_t2, panel0_t2_ylim);
+
+p0_right_top = uipanel('Parent', f0, 'Units', 'normalized', 'Position', [0.49 0.52 0.49 0.42], ...
+    'BackgroundColor', 'w', 'BorderType', 'none');
+ax0_top = axes('Parent', p0_right_top);
+local_plot_ee_normal_xy(ax0_top, time, ee_pos, normal_est_xy, panel0_xlim);
+
+p0_right_bottom = uipanel('Parent', f0, 'Units', 'normalized', 'Position', [0.49 0.08 0.49 0.36], ...
+    'BackgroundColor', 'w', 'BorderType', 'none');
+tl0_right = tiledlayout(p0_right_bottom, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+for i = 1:3
+    ax = nexttile(tl0_right);
+    plot(ax, time, mob_force_none(:,i), 'LineWidth', 1.2, 'Color', meas_color); hold(ax, 'on');
+    plot(ax, time, mob_force_residual(:,i), '--', 'LineWidth', 1.2, 'Color', cmd_color);
+    grid(ax, 'on');
+    xlabel(ax, 'time [s]');
+    ylabel(ax, sprintf('%s [N]', axis_names{i}));
+    title(ax, sprintf('Momentum observer %s: pure vs consistency', axis_names{i}));
+    legend(ax, {'pure', 'consistency'}, 'Location', 'best');
+    xlim(ax, panel0_xlim);
+    ylim(ax, panel0_mob_ylim);
+end
+
 %% 6) Figure 0.5: top pose / command position / attitude compare panel
-panel05_xlim = [25 75];               % e.g. [0 10]
+panel05_xlim = [40 70];               % e.g. [0 10]
 panel05_pos_ylim = [];           % fallback for all position subplots
 panel05_vel_ylim = [];           % fallback for all velocity subplots
 panel05_att_ylim = [];           % fallback for all attitude subplots
-panel05_pos_x_ylim = [-0.0 1.5];         % e.g. [-1 1]
-panel05_pos_y_ylim = [-0.5 0.7];         % e.g. [-1 1]
-panel05_pos_z_ylim = [1.0 2.0];         % e.g. [0 1]
-panel05_vel_x_ylim = [-0.3 1.0];         % e.g. [-1 1]
+panel05_pos_x_ylim = [-0.3 0.3];         % e.g. [-1 1]
+panel05_pos_y_ylim = [-0.3 0.3];         % e.g. [-1 1]
+panel05_pos_z_ylim = [0.4 1.0];         % e.g. [0 1]
+panel05_vel_x_ylim = [-0.3 0.3];         % e.g. [-1 1]
 panel05_vel_y_ylim = [-0.3 0.3];         % e.g. [-1 1]
 panel05_vel_z_ylim = [-0.3 0.3];         % e.g. [-1 1]
 panel05_att_x_ylim = [-0.1 0.1];         % e.g. [-0.5 0.5]
@@ -535,7 +613,7 @@ for i = 1:3
 end
 
 %% 7) Figure 1: MOB force compare / torque panel
-panel1_xlim = [10 40];                % e.g. [0 10]
+panel1_xlim = [30 60];                % e.g. [0 10]
 panel1_force_ylim = [-0.05 0.05];          % fallback for all MOB force subplots
 panel1_torque_ylim = [-0.05 0.05];         % fallback for all MOB torque subplots
 panel1_force_x_ylim = [-0.05 0.05];
@@ -891,4 +969,103 @@ function ang_deg = local_angle_between_unit_vectors(a, b)
     cos_theta(valid) = dot_ab(valid) ./ denom(valid);
     cos_theta = max(min(cos_theta, 1), -1);
     ang_deg = rad2deg(acos(cos_theta));
+end
+
+function ee_pos = local_compute_ee_position_world(pose_xyz, pose_rpy, ee_offset_body)
+    n = size(pose_xyz, 1);
+    ee_pos = nan(n, 3);
+    for k = 1:n
+        if any(~isfinite(pose_xyz(k,:))) || any(~isfinite(pose_rpy(k,:)))
+            continue;
+        end
+        R = local_rpy_to_rotmat(pose_rpy(k,:));
+        ee_pos(k,:) = pose_xyz(k,:) + (R * ee_offset_body(:)).';
+    end
+end
+
+function unit_rows = local_normalize_rows(x)
+    unit_rows = x;
+    row_norm = vecnorm(x, 2, 2);
+    valid = isfinite(row_norm) & row_norm > 1.0e-9;
+    unit_rows(valid,:) = x(valid,:) ./ row_norm(valid);
+    unit_rows(~valid,:) = nan;
+end
+
+function local_plot_ee_normal_xy(ax, time, ee_pos, normal_xy, xlim_time)
+    valid_time = true(size(time));
+    if numel(xlim_time) == 2 && all(isfinite(xlim_time))
+        valid_time = time >= xlim_time(1) & time <= xlim_time(2);
+    end
+    valid = valid_time & all(isfinite(ee_pos), 2);
+
+    cla(ax);
+    hold(ax, 'on');
+    grid(ax, 'on');
+    axis(ax, 'equal');
+    xlabel(ax, 'X [m]');
+    ylabel(ax, 'Y [m]');
+    title(ax, 'Normal estimation and EE trajectory (XY plane)');
+
+    if ~any(valid)
+        text(ax, 0.5, 0.5, 'EE position is not available', ...
+            'Units', 'normalized', 'HorizontalAlignment', 'center');
+        return;
+    end
+
+    plot(ax, ee_pos(valid,1), ee_pos(valid,2), 'LineWidth', 1.4, 'Color', [0.0000 0.4470 0.7410]);
+
+    quiver_idx = find(valid & all(isfinite(normal_xy), 2));
+    quiver_step = max(1, floor(numel(quiver_idx) / 25));
+    quiver_idx = quiver_idx(1:quiver_step:end);
+    if ~isempty(quiver_idx)
+        quiver(ax, ee_pos(quiver_idx,1), ee_pos(quiver_idx,2), ...
+            normal_xy(quiver_idx,1), normal_xy(quiver_idx,2), 0.15, ...
+            'Color', [0.8500 0.3250 0.0980], 'LineWidth', 1.0, 'MaxHeadSize', 1.5);
+    end
+
+    legend(ax, {'EE trajectory', 'normal est (XY proj)'}, 'Location', 'best');
+end
+
+function [t1_rows, t2_rows] = local_compute_normal_frame_tangents(normal_rows)
+    n = size(normal_rows, 1);
+    t1_rows = nan(n, 3);
+    t2_rows = nan(n, 3);
+    z_axis = [0.0, 0.0, 1.0];
+    y_axis = [0.0, 1.0, 0.0];
+
+    for k = 1:n
+        x_axis = normal_rows(k,:);
+        if any(~isfinite(x_axis))
+            continue;
+        end
+        x_norm = norm(x_axis);
+        if x_norm < 1.0e-6
+            continue;
+        end
+        x_axis = x_axis / x_norm;
+
+        t1 = cross(z_axis, x_axis);
+        if norm(t1) < 1.0e-6
+            t1 = cross(y_axis, x_axis);
+        end
+        if norm(t1) < 1.0e-6
+            continue;
+        end
+        t1 = t1 / norm(t1);
+
+        t2 = cross(x_axis, t1);
+        if norm(t2) < 1.0e-6
+            continue;
+        end
+        t2 = t2 / norm(t2);
+
+        t1_rows(k,:) = t1;
+        t2_rows(k,:) = t2;
+    end
+end
+
+function proj = local_project_rows(v_rows, axis_rows)
+    proj = nan(size(v_rows, 1), 1);
+    valid = all(isfinite(v_rows), 2) & all(isfinite(axis_rows), 2);
+    proj(valid) = sum(v_rows(valid,:) .* axis_rows(valid,:), 2);
 end

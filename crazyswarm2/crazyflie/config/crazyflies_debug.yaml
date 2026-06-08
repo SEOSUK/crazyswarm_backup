@@ -47,12 +47,18 @@ robot_types:
         cf_su_normal_debug:
           frequency: 20
           vars: [suPosRef.nPreX, suPosRef.nPreY, suPosRef.nPreZ, suPosRef.nPostX, suPosRef.nPostY, suPosRef.nPostZ]
+        cf_su_normal_metrics:
+          frequency: 20
+          vars: [suPosRef.vEeX, suPosRef.vEeY, suPosRef.vEeZ, suPosRef.omgN, suPosRef.nVelLeak]
         vel_att_des:
           frequency: 10
           vars: [posCtl.targetVX, posCtl.targetVY, posCtl.targetVZ, controller.roll, controller.pitch, controller.yaw]
         cf_ctrl_misc:
           frequency: 10
           vars: [pm.vbat, ctrltarget.x, ctrltarget.y, ctrltarget.z]
+        cf_stabilizer_timing:
+          frequency: 20
+          vars: [stabilizer.loopDtUs, stabilizer.loopDtUsMax]
         cf_mob_pure:
           frequency: 20
           vars: [suWrenchObs.fHatNWx, suWrenchObs.fHatNWy, suWrenchObs.fHatNWz, suWrenchObs.tauLWx, suWrenchObs.tauLWy, suWrenchObs.tauLWz]

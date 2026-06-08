@@ -1,11 +1,14 @@
 from collections import deque
 import math
+from pathlib import Path
 import rclpy
 from rclpy.node import Node
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
 from std_msgs.msg import Float64MultiArray, String
+import yaml
 
+from ament_index_python.packages import get_package_share_directory
 from crazyflie_py import Crazyswarm
 
 
@@ -14,7 +17,7 @@ HOVER_CALIBRATION_WINDOW_SEC = 2.0
 HOVER_BUFFER_KEEP_SEC = 3.0
 HOVER_MIN_SAMPLES = 20
 THRUST_INDEX_RANGE = range(13, 17)
-MOB_TORQUE_INDEX_RANGE = range(57, 60)
+BODY_TORQUE_INDEX_RANGE = range(27, 30)
 HOVER_TRIGGER_RETRY_PERIOD_SEC = 1.0
 HOVER_TRIGGER_RETRY_COUNT = 3
 
@@ -49,6 +52,8 @@ class SuInterface(Node):
         self.latest_hover_calibration = None
         self.pending_hover_calibration_repeats = 0
         self.disarm_retry_timer = None
+        self.su_params_path = Path(get_package_share_directory('crazyflie')) / 'config' / 'su_params.yaml'
+        self.current_mass, self.current_com_off_x, self.current_com_off_y = self._load_current_hover_calibration()
         self.hover_calibration_retry_timer = self.create_timer(
             HOVER_TRIGGER_RETRY_PERIOD_SEC,
             self.retry_hover_calibration_trigger,
@@ -70,19 +75,19 @@ class SuInterface(Node):
             self.trigger_zero_bias()
 
     def debug_callback(self, msg):
-        if len(msg.data) <= MOB_TORQUE_INDEX_RANGE.stop - 1:
+        if len(msg.data) <= BODY_TORQUE_INDEX_RANGE.stop - 1:
             return
 
         motor_thrust = [msg.data[i] for i in THRUST_INDEX_RANGE]
-        mob_torque = [msg.data[i] for i in MOB_TORQUE_INDEX_RANGE]
-        if not all(math.isfinite(value) for value in motor_thrust + mob_torque):
+        body_torque = [msg.data[i] for i in BODY_TORQUE_INDEX_RANGE]
+        if not all(math.isfinite(value) for value in motor_thrust + body_torque):
             return
 
         sample = {
             'time': self.get_clock().now().nanoseconds * 1e-9,
             'hover_thrust': sum(motor_thrust),
-            'tau_x': mob_torque[0],
-            'tau_y': mob_torque[1],
+            'tau_x': body_torque[0],
+            'tau_y': body_torque[1],
         }
         self.hover_samples.append(sample)
         self._trim_hover_samples(sample['time'])
@@ -91,6 +96,27 @@ class SuInterface(Node):
         cutoff_sec = now_sec - HOVER_BUFFER_KEEP_SEC
         while self.hover_samples and self.hover_samples[0]['time'] < cutoff_sec:
             self.hover_samples.popleft()
+
+    def _load_current_hover_calibration(self):
+        try:
+            with self.su_params_path.open('r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+        except Exception as exc:
+            self.get_logger().warning(
+                f'Failed to read current hover calibration from {self.su_params_path}: {exc}'
+            )
+            return (float('nan'), 0.0, 0.0)
+
+        su_wrench = (
+            data.get('robot_types', {})
+            .get('cf21', {})
+            .get('firmware_params', {})
+            .get('su_wrench', {})
+        )
+        mass = float(su_wrench.get('mass', float('nan')))
+        com_off_x = float(su_wrench.get('comOffX', 0.0))
+        com_off_y = float(su_wrench.get('comOffY', 0.0))
+        return (mass, com_off_x, com_off_y)
 
     def trigger_hover_calibration(self):
         now_sec = self.get_clock().now().nanoseconds * 1e-9
@@ -117,9 +143,18 @@ class SuInterface(Node):
             )
             return
 
+        self.current_mass, self.current_com_off_x, self.current_com_off_y = self._load_current_hover_calibration()
+        current_com_off_x = self.current_com_off_x
+        current_com_off_y = self.current_com_off_y
+
         mass = hover_thrust / HOVER_GRAVITY
-        com_off_x = -tau_y / hover_thrust
-        com_off_y = tau_x / hover_thrust
+        # tau_input already includes the currently configured CoM compensation term.
+        # In hover, the remaining body-torque mismatch corresponds to the error
+        # between the current CoM estimate and the true CoM offset.
+        delta_com_x = -tau_y / hover_thrust
+        delta_com_y = tau_x / hover_thrust
+        com_off_x = current_com_off_x - delta_com_x
+        com_off_y = current_com_off_y - delta_com_y
 
         if not all(math.isfinite(value) for value in (mass, com_off_x, com_off_y)):
             self.get_logger().warning(
@@ -137,19 +172,29 @@ class SuInterface(Node):
             'hover_thrust': hover_thrust,
             'tau_x': tau_x,
             'tau_y': tau_y,
+            'delta_com_x': delta_com_x,
+            'delta_com_y': delta_com_y,
             'sample_count': len(samples),
         }
         self.latest_hover_calibration = calibration
+        self.current_mass = mass
+        self.current_com_off_x = com_off_x
+        self.current_com_off_y = com_off_y
         self.pending_hover_calibration_repeats = max(0, HOVER_TRIGGER_RETRY_COUNT - 1)
 
         self.send_hover_calibration_trigger(calibration, log_request=True)
         self.get_logger().info(
-            'HOVER CALIBRATION local result: samples=%d, thrust=%.4f N, tau_hover=(%.5f, %.5f) N*m, '
-            'mass=%.4f kg, comOffXY=(%.5f, %.5f) m',
+            'HOVER CALIBRATION local result: samples=%d, thrust=%.4f N, tau_input=(%.5f, %.5f) N*m, '
+            'current comOffXY=(%.5f, %.5f) m, delta comOffXY=(%.5f, %.5f) m, '
+            'mass=%.4f kg, new comOffXY=(%.5f, %.5f) m',
             calibration['sample_count'],
             calibration['hover_thrust'],
             calibration['tau_x'],
             calibration['tau_y'],
+            current_com_off_x,
+            current_com_off_y,
+            calibration['delta_com_x'],
+            calibration['delta_com_y'],
             calibration['mass'],
             calibration['com_off_x'],
             calibration['com_off_y'],

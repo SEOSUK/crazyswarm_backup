@@ -29,6 +29,10 @@ robot_types:
         cf_su_motor_thrust:
           frequency: 20
           vars: [suWrenchObs.f1, suWrenchObs.f2, suWrenchObs.f3, suWrenchObs.f4]
+        # Body-frame input torque used for CoM hover calibration.
+        cf_su_body_torque:
+          frequency: 20
+          vars: [suWrenchObs.tauInBx, suWrenchObs.tauInBy, suWrenchObs.tauInBz]
         # Velocity from firmware stateEstimate + position differentiation helper.
         cf_su_vel_pair:
           frequency: 20
@@ -68,8 +72,8 @@ robot_types:
         extPosStdDev: 1e-3
         extQuatStdDev: 0.5e-1
       imu_sensors:
-        accTrimRoll: -0.8
-        accTrimPitch: -0.4
+        accTrimRoll: -0.32
+        accTrimPitch: -0.05
 
 
       kalman:

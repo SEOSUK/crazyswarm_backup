@@ -170,7 +170,7 @@ mob_force_final_norm = vecnorm(mob_force_final, 2, 2);
 mob_torque_norm = vecnorm(mob_torque, 2, 2);
 mob_residual_norm = vecnorm(mob_residual, 2, 2);
 
-panelm1_acc_lpf_hz = [0.01];          % e.g. 8.0, [] or <=0 disables LPF
+panelm1_acc_lpf_hz = [0.1];          % e.g. 8.0, [] or <=0 disables LPF
 acc_raw_body_for_recon = local_lowpass_first_order(acc_raw_body, sample_hz, panelm1_acc_lpf_hz);
 
 acc_from_raw_rpy = nan(size(acc_raw_body_for_recon));
@@ -178,7 +178,7 @@ acc_from_raw_rpy(:,1) = atan2(acc_raw_body_for_recon(:,2), acc_raw_body_for_reco
 acc_from_raw_rpy(:,2) = atan2(-acc_raw_body_for_recon(:,1), sqrt(acc_raw_body_for_recon(:,2).^2 + acc_raw_body_for_recon(:,3).^2));
 acc_from_raw_rpy(:,3) = nan(size(time));
 
-panelm1_gyro_lpf_hz = [0.01];         % e.g. 8.0, [] or <=0 disables LPF
+panelm1_gyro_lpf_hz = [0.1];         % e.g. 8.0, [] or <=0 disables LPF
 gyro_body_for_recon = local_lowpass_first_order(gyro_body, sample_hz, panelm1_gyro_lpf_hz);
 gyro_integrated_rpy = local_integrate_body_rates_to_rpy_deg(gyro_body_for_recon, time, pose_rpy(1,:));
 gyro_integrated_rpy(:,3) = unwrap(gyro_integrated_rpy(:,3));
@@ -224,7 +224,7 @@ acc_color = [0.2 0.6 0.2];
 pos_color = [0.4940 0.1840 0.5560];
 
 %% 5.5) Figure -1: accel/gyro inputs and offline attitude reconstruction
-panelm1_xlim = [25 80];                % e.g. [0 10]
+panelm1_xlim = [25 190];                % e.g. [0 10]
 panelm1_acc_ylim = [];            % fallback for all raw-acc subplots
 panelm1_gyro_ylim = [];           % fallback for all raw-gyro subplots
 panelm1_rpy_ylim = [];            % fallback for all attitude subplots
@@ -358,7 +358,7 @@ for i = 1:3
 end
 
 %% 5.6) Figure -0.5: normal estimation compare
-panelm05_xlim = [25 75];         % reuse accel/gyro time window
+panelm05_xlim = [25 160];         % reuse accel/gyro time window
 panelm05_normal_ylim = [];            % fallback for all world-normal subplots
 panelm05_normal_x_ylim = [-1. 0];          % e.g. [-0.5 0.5]
 panelm05_normal_y_ylim = [-0.5 0.5];          % e.g. [-0.5 0.5]

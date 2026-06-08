@@ -18,10 +18,10 @@ robot_types:
         traj1SizeY: 0.0  # z-axis radius/side length [m]
         traj1Period: 40.0  # [s]
 
-        preloadEn: 1  # 0: fixed normal [-1,0,0], 1: force-dominant normal estimator
+        preloadEn: 1  # 0: velocity-mode yaw follows server command, 1: velocity-mode yaw aligns to estimated normal direction
         preloadGf: 25.0  # effective gain from normal force error to normal velocity command
         preloadGv: 20.0  # effective gain from normal velocity leakage to command
-        preloadNu: 0.2  # [m/s], symmetric saturation bound for normal velocity command
+        preloadNu: 0.3  # [m/s], symmetric saturation bound for normal velocity command
 
         normBeta: 1.0  # [1/s] beta ≈ 2*pi*f_c, decay rate of the normal-axis memory matrix
         normEpsG: 0.0005  # [m^2/s^2], velocity-projection regularization epsilon_g
@@ -29,6 +29,5 @@ robot_types:
 
         epsilonFMin: 1.01  # [N], yaw-alignment smoothing starts when |F_xy| exceeds this
         epsilonFMax: 2.025  # [N], yaw-alignment reaches full weight when |F_xy| exceeds this
-        yawForceLpfHz: 0.0  # [Hz], <0 disables yaw align, 0 bypasses LPF, >0 applies first-order LPF before yaw align
 shared_defaults:
   command_reference: end_effector

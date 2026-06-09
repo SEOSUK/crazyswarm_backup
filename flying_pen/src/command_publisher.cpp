@@ -23,7 +23,6 @@
 #include <vector>
 
 using namespace std::chrono_literals;
-static constexpr auto kVelocityModeHandoffDelay = 50ms;
 
 class CommandPublisher : public rclcpp::Node
 {
@@ -87,6 +86,7 @@ public:
     last_battery_display_update_ = std::chrono::steady_clock::now();
     has_latest_pose_ = false;
     has_latest_fw_cmd_ = false;
+    command_initialized_ = true;
 
     last_inputs_.clear();
     for (size_t i = 0; i < HISTORY_LEN; ++i) {
@@ -290,9 +290,14 @@ private:
     }
   }
 
-  bool isVelocityMode() const
+  bool isContactFrameVelocityMode() const
   {
     return current_mode_ == crazyflie_interfaces::msg::PositionControl::MODE_VELOCITY;
+  }
+
+  bool usesVelocityCommands() const
+  {
+    return true;
   }
 
   uint8_t parseCommandReference(const std::string & frame) const
@@ -309,7 +314,7 @@ private:
 
   void onPositiveX()
   {
-    if (isVelocityMode()) {
+    if (usesVelocityCommands()) {
       cmd_xyz_yaw_[0] += velocity_tick_[0];
       pushInputHistory("w : vx += tick");
     } else {
@@ -320,7 +325,7 @@ private:
 
   void onNegativeX()
   {
-    if (isVelocityMode()) {
+    if (usesVelocityCommands()) {
       cmd_xyz_yaw_[0] -= velocity_tick_[0];
       pushInputHistory("s : vx -= tick");
     } else {
@@ -331,7 +336,7 @@ private:
 
   void onPositiveY()
   {
-    if (isVelocityMode()) {
+    if (usesVelocityCommands()) {
       cmd_xyz_yaw_[1] += velocity_tick_[1];
       pushInputHistory("a : vy += tick");
     } else {
@@ -342,7 +347,7 @@ private:
 
   void onNegativeY()
   {
-    if (isVelocityMode()) {
+    if (usesVelocityCommands()) {
       cmd_xyz_yaw_[1] -= velocity_tick_[1];
       pushInputHistory("d : vy -= tick");
     } else {
@@ -353,7 +358,7 @@ private:
 
   void onPositiveZ()
   {
-    if (isVelocityMode()) {
+    if (usesVelocityCommands()) {
       cmd_xyz_yaw_[2] += velocity_tick_[2];
       pushInputHistory("e : vz += tick");
     } else {
@@ -364,7 +369,7 @@ private:
 
   void onNegativeZ()
   {
-    if (isVelocityMode()) {
+    if (usesVelocityCommands()) {
       cmd_xyz_yaw_[2] -= velocity_tick_[2];
       pushInputHistory("q : vz -= tick");
     } else {
@@ -376,55 +381,21 @@ private:
   void setPositionMode(uint8_t mode)
   {
     if (mode == current_mode_) {
-      status_msg_ = isVelocityMode() ? "already in VELOCITY mode" : "already in POSITION mode";
+      status_msg_ = isContactFrameVelocityMode() ?
+        "already in CONTACT-FRAME velocity mode" :
+        "already in WORLD-FRAME velocity mode";
       return;
     }
-
-    const bool trajectory_was_active =
-      current_trajectory_mode_ != crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE;
-
-    if (mode == crazyflie_interfaces::msg::PositionControl::MODE_VELOCITY) {
-      cmd_xyz_yaw_[0] = 0.0;
-      cmd_xyz_yaw_[1] = 0.0;
-      cmd_xyz_yaw_[2] = 0.0;
-      velocity_mode_command_ready_time_ = std::chrono::steady_clock::now() + kVelocityModeHandoffDelay;
-      status_msg_ = trajectory_was_active ?
-        "entered VELOCITY mode, trajectory stopped" :
-        "entered VELOCITY mode, current position reference preserved in firmware";
-      pushInputHistory("i : enter velocity mode");
-    } else {
-      velocity_mode_command_ready_time_ = std::chrono::steady_clock::time_point{};
-      if (has_latest_fw_cmd_) {
-        const auto latest_reference_cmd = latestFwCommandInActiveReferenceFrame();
-        cmd_xyz_yaw_[0] = latest_reference_cmd[0];
-        cmd_xyz_yaw_[1] = latest_reference_cmd[1];
-        cmd_xyz_yaw_[2] = latest_reference_cmd[2];
-        if (has_latest_pose_) {
-          cmd_xyz_yaw_[3] = latest_pose_xyz_yaw_[3];
-        }
-        status_msg_ = "entered POSITION mode, command aligned to firmware final reference";
-      } else if (has_latest_pose_) {
-        const auto latest_reference_pose = latestPoseInActiveReferenceFrame();
-        cmd_xyz_yaw_[0] = latest_reference_pose[0];
-        cmd_xyz_yaw_[1] = latest_reference_pose[1];
-        cmd_xyz_yaw_[2] = latest_reference_pose[2];
-        cmd_xyz_yaw_[3] = latest_pose_xyz_yaw_[3];
-        status_msg_ = "entered POSITION mode, firmware reference unavailable so command aligned to latest pose";
-      } else {
-        cmd_xyz_yaw_[0] = 0.0;
-        cmd_xyz_yaw_[1] = 0.0;
-        cmd_xyz_yaw_[2] = 0.0;
-        status_msg_ = "entered POSITION mode, pose unavailable so command reset";
-      }
-      if (trajectory_was_active) {
-        status_msg_ = "entered POSITION mode, trajectory stopped";
-      }
-      pushInputHistory("u : enter position mode");
-    }
-
     current_mode_ = mode;
-    current_trajectory_mode_ = crazyflie_interfaces::msg::PositionControl::TRAJECTORY_NONE;
+    velocity_mode_command_ready_time_ = std::chrono::steady_clock::time_point{};
     publishPositionControl();
+    if (isContactFrameVelocityMode()) {
+      status_msg_ = "contact-frame velocity mode enabled";
+      pushInputHistory("i : contact-frame velocity ON");
+    } else {
+      status_msg_ = "world-frame velocity mode enabled";
+      pushInputHistory("u : contact-frame velocity OFF");
+    }
   }
 
   void setCommandReference(uint8_t commandReference)
@@ -434,7 +405,7 @@ private:
       return;
     }
 
-    if (!isVelocityMode() && has_latest_pose_) {
+    if (has_latest_pose_) {
       const auto latest_reference_pose =
         commandReference == crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR ?
           latestPoseInReferenceFrame(crazyflie_interfaces::msg::PositionControl::REFERENCE_END_EFFECTOR) :
@@ -476,7 +447,7 @@ private:
 
   void resetActiveCommand()
   {
-    if (isVelocityMode()) {
+    if (usesVelocityCommands()) {
       cmd_xyz_yaw_[0] = 0.0;
       cmd_xyz_yaw_[1] = 0.0;
       cmd_xyz_yaw_[2] = 0.0;
@@ -503,7 +474,11 @@ private:
 
   void publishPositionCmd()
   {
-    if (isVelocityMode() &&
+    if (!command_initialized_) {
+      return;
+    }
+
+    if (usesVelocityCommands() &&
         velocity_mode_command_ready_time_.time_since_epoch().count() > 0 &&
         std::chrono::steady_clock::now() < velocity_mode_command_ready_time_) {
       return;
@@ -710,6 +685,7 @@ private:
     latest_pose_xyz_yaw_[2] = msg->pose.position.z;
     latest_pose_xyz_yaw_[3] = yaw_deg;
     has_latest_pose_ = true;
+
   }
 
   void fwCmdPositionCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
@@ -784,8 +760,8 @@ private:
     clear();
 
     drawSepLine(ROW_USAGE_HEADER, "usage");
-    mvprintw(ROW_USAGE_1, 0, "position: w/s(x), a/d(y), e/q(z), z/c(yaw), x(hold/reset), i->velocity");
-    mvprintw(ROW_USAGE_2, 0, "velocity: w/s/a/d/e/q(v), x(zero vel), u->position, n(stop), m(run)");
+    mvprintw(ROW_USAGE_1, 0, "velocity: w/s(x), a/d(y), e/q(z), z/c(yaw), x(zero vel), i(contact on)");
+    mvprintw(ROW_USAGE_2, 0, "velocity: w/s/a/d/e/q(v), u(contact off), n(stop), m(run)");
     mvprintw(ROW_USAGE_3, 0, "force/bias: j/k/l (cmd_fx), r(zero bias), f(hover mass/com), o/p arm/disarm, t quit");
 
     drawSepLine(ROW_STATUS_HEADER, "status");
@@ -814,7 +790,7 @@ private:
     clrtoeol();
     printw(
       "mode: %s, frame: %s, pos_tick=(%.2f %.2f %.2f), vel_tick=(%.2f %.2f %.2f)",
-      isVelocityMode() ? "VELOCITY" : "POSITION",
+      isContactFrameVelocityMode() ? "VEL_CONTACT" : "VEL_WORLD",
       command_frame_.c_str(),
       position_tick_[0], position_tick_[1], position_tick_[2],
       velocity_tick_[0], velocity_tick_[1], velocity_tick_[2]);
@@ -872,15 +848,9 @@ private:
   {
     move(ROW_CMD_LINE1, 0);
     clrtoeol();
-    if (isVelocityMode()) {
-      printw(
-        "velocity cmd xyz = %.3f , %.3f , %.3f (reference=%s)",
-        cmd_xyz_yaw_[0], cmd_xyz_yaw_[1], cmd_xyz_yaw_[2], command_frame_.c_str());
-    } else {
-      printw(
-        "position cmd xyz = %.3f , %.3f , %.3f (reference=%s)",
-        cmd_xyz_yaw_[0], cmd_xyz_yaw_[1], cmd_xyz_yaw_[2], command_frame_.c_str());
-    }
+    printw(
+      "velocity cmd xyz = %.3f , %.3f , %.3f (reference=%s)",
+      cmd_xyz_yaw_[0], cmd_xyz_yaw_[1], cmd_xyz_yaw_[2], command_frame_.c_str());
 
     move(ROW_CMD_LINE2, 0);
     clrtoeol();
@@ -932,6 +902,7 @@ private:
   uint8_t current_trajectory_mode_;
   bool has_latest_pose_;
   bool has_latest_fw_cmd_;
+  bool command_initialized_{false};
   std::string command_frame_;
   std::string trajectory_label_none_;
   std::string trajectory_label_1_;

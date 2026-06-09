@@ -255,7 +255,7 @@ acc_color = [0.2 0.6 0.2];
 pos_color = [0.4940 0.1840 0.5560];
 
 %% 5.7) Figure 0: contact-frame overview / normal + EE top view / MOB pure vs consistency
-panel0_xlim = [37 170];
+panel0_xlim = [32 86];
 panel0_force_ylim = [-0.02 0.12];
 panel0_t1_ylim = [-0.35 0.35];
 panel0_t2_ylim = [-0.35 0.35];
@@ -304,8 +304,11 @@ ylim(ax0_t2, panel0_t2_ylim);
 
 p0_right_top = uipanel('Parent', f0, 'Units', 'normalized', 'Position', [0.49 0.52 0.49 0.42], ...
     'BackgroundColor', 'w', 'BorderType', 'none');
-ax0_top = axes('Parent', p0_right_top);
-local_plot_ee_normal_xy(ax0_top, time, ee_pos, normal_est_xy, panel0_xlim);
+tl0_top = tiledlayout(p0_right_top, 1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+ax0_top_xy = nexttile(tl0_top);
+local_plot_ee_normal_xy(ax0_top_xy, time, ee_pos, normal_est_xy, panel0_xlim);
+ax0_top_xz = nexttile(tl0_top);
+local_plot_ee_normal_xz(ax0_top_xz, time, ee_pos, normal_est_logged, panel0_xlim);
 
 p0_right_bottom = uipanel('Parent', f0, 'Units', 'normalized', 'Position', [0.49 0.08 0.49 0.36], ...
     'BackgroundColor', 'w', 'BorderType', 'none');
@@ -356,8 +359,142 @@ xlabel(ax0_timer_hist, 'loopDtUs [us]');
 ylabel(ax0_timer_hist, 'count');
 title(ax0_timer_hist, 'Stabilizer loop elapsed-time histogram');
 
+
+%% 5.6.1) Figure -0.4: normal metrics + position
+panelm04_xlim = [0 40];
+panelm04_alpha_min = 0.15;
+panelm04_omega_bar = 0.15;
+panelm04_leak_bar = 0.07;
+panelm04_pos_ylim = [];
+panelm04_force_ylim = [];
+panelm04_omega_ylim = [];
+panelm04_leak_ylim = [];
+panelm04_alpha_ylim = [panelm04_alpha_min 1.02];
+
+omega_alpha = panelm04_alpha_min + (1.0 - panelm04_alpha_min) ./ ...
+    (1.0 + (omega_n_logged ./ panelm04_omega_bar).^2);
+leak_alpha = panelm04_alpha_min + (1.0 - panelm04_alpha_min) ./ ...
+    (1.0 + (normal_velocity_leakage_logged ./ panelm04_leak_bar).^2);
+
+fm04 = figure('Name', 'Debug Normal Metrics and Position', 'NumberTitle', 'off', 'Color', 'w', ...
+    'Units', 'normalized', 'Position', [0.08 0.10 0.84 0.72]);
+
+p04_left = uipanel('Parent', fm04, 'Units', 'normalized', 'Position', [0.04 0.08 0.52 0.86], ...
+    'BackgroundColor', 'w', 'BorderType', 'none');
+tl04_left = tiledlayout(p04_left, 6, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+for i = 1:3
+    ax = nexttile(tl04_left);
+    plot(ax, time, pose_xyz(:,i), 'LineWidth', 1.2, 'Color', meas_color);
+    grid(ax, 'on');
+    xlabel(ax, 'time [s]');
+    ylabel(ax, sprintf('%s [m]', axis_names{i}));
+    title(ax, sprintf('Position %s', axis_names{i}));
+    if ~isempty(panelm04_xlim)
+        xlim(ax, panelm04_xlim);
+    elseif ~isempty(summary_xlim)
+        xlim(ax, summary_xlim);
+    end
+    if ~isempty(panelm04_pos_ylim)
+        ylim(ax, panelm04_pos_ylim);
+    end
+end
+
+for i = 1:3
+    ax = nexttile(tl04_left);
+    plot(ax, time, mob_force_final(:,i), 'LineWidth', 1.2, 'Color', cmd_color);
+    grid(ax, 'on');
+    xlabel(ax, 'time [s]');
+    ylabel(ax, sprintf('%s [N]', axis_names{i}));
+    title(ax, sprintf('Momentum observer force %s', axis_names{i}));
+    if ~isempty(panelm04_xlim)
+        xlim(ax, panelm04_xlim);
+    elseif ~isempty(summary_xlim)
+        xlim(ax, summary_xlim);
+    end
+    if ~isempty(panelm04_force_ylim)
+        ylim(ax, panelm04_force_ylim);
+    end
+end
+
+p04_right = uipanel('Parent', fm04, 'Units', 'normalized', 'Position', [0.60 0.08 0.36 0.86], ...
+    'BackgroundColor', 'w', 'BorderType', 'none');
+p04_right_top = uipanel('Parent', p04_right, 'Units', 'normalized', 'Position', [0.00 0.52 1.00 0.48], ...
+    'BackgroundColor', 'w', 'BorderType', 'none');
+tl04_top = tiledlayout(p04_right_top, 1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+ax04_top_xy = nexttile(tl04_top);
+local_plot_ee_normal_xy(ax04_top_xy, time, ee_pos, normal_est_xy, panelm04_xlim);
+ax04_top_xz = nexttile(tl04_top);
+local_plot_ee_normal_xz(ax04_top_xz, time, ee_pos, normal_est_logged, panelm04_xlim);
+
+p04_right_bottom = uipanel('Parent', p04_right, 'Units', 'normalized', 'Position', [0.00 0.00 1.00 0.48], ...
+    'BackgroundColor', 'w', 'BorderType', 'none');
+tl04_right = tiledlayout(p04_right_bottom, 2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+ax04_omega = nexttile(tl04_right);
+plot(ax04_omega, time, omega_n_logged, 'LineWidth', 1.2, 'Color', acc_color);
+grid(ax04_omega, 'on');
+xlabel(ax04_omega, 'time [s]');
+ylabel(ax04_omega, '[1/s]');
+title(ax04_omega, '\omega_n');
+if ~isempty(panelm04_xlim)
+    xlim(ax04_omega, panelm04_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(ax04_omega, summary_xlim);
+end
+if ~isempty(panelm04_omega_ylim)
+    ylim(ax04_omega, panelm04_omega_ylim);
+end
+
+ax04_omega_alpha = nexttile(tl04_right);
+plot(ax04_omega_alpha, time, omega_alpha, 'LineWidth', 1.2, 'Color', cmd_color);
+grid(ax04_omega_alpha, 'on');
+xlabel(ax04_omega_alpha, 'time [s]');
+ylabel(ax04_omega_alpha, '[-]');
+title(ax04_omega_alpha, sprintf('\\alpha_\\omega (\\alpha_{min}=%.2f, \\bar{\\omega}=%.2f)', ...
+    panelm04_alpha_min, panelm04_omega_bar));
+if ~isempty(panelm04_xlim)
+    xlim(ax04_omega_alpha, panelm04_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(ax04_omega_alpha, summary_xlim);
+end
+if ~isempty(panelm04_alpha_ylim)
+    ylim(ax04_omega_alpha, panelm04_alpha_ylim);
+end
+
+ax04_leak = nexttile(tl04_right);
+plot(ax04_leak, time, normal_velocity_leakage_logged, 'LineWidth', 1.2, 'Color', pos_color);
+grid(ax04_leak, 'on');
+xlabel(ax04_leak, 'time [s]');
+ylabel(ax04_leak, '[-]');
+title(ax04_leak, 'normal velocity leakage');
+if ~isempty(panelm04_xlim)
+    xlim(ax04_leak, panelm04_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(ax04_leak, summary_xlim);
+end
+if ~isempty(panelm04_leak_ylim)
+    ylim(ax04_leak, panelm04_leak_ylim);
+end
+
+ax04_leak_alpha = nexttile(tl04_right);
+plot(ax04_leak_alpha, time, leak_alpha, 'LineWidth', 1.2, 'Color', meas_color);
+grid(ax04_leak_alpha, 'on');
+xlabel(ax04_leak_alpha, 'time [s]');
+ylabel(ax04_leak_alpha, '[-]');
+title(ax04_leak_alpha, sprintf('\\alpha_{leak} (\\alpha_{min}=%.2f, \\bar{v}_{leak}=%.2f)', ...
+    panelm04_alpha_min, panelm04_leak_bar));
+if ~isempty(panelm04_xlim)
+    xlim(ax04_leak_alpha, panelm04_xlim);
+elseif ~isempty(summary_xlim)
+    xlim(ax04_leak_alpha, summary_xlim);
+end
+if ~isempty(panelm04_alpha_ylim)
+    ylim(ax04_leak_alpha, panelm04_alpha_ylim);
+end
+
+
 %% 5.6) Figure -0.5: normal estimation compare
-panelm05_xlim = [25 80];         % reuse accel/gyro time window
+panelm05_xlim = [32  40];         % reuse accel/gyro time window
 panelm05_normal_ylim = [];            % fallback for all world-normal subplots
 panelm05_normal_x_ylim = [-1. 0];          % e.g. [-0.5 0.5]
 panelm05_normal_y_ylim = [-0.5 0.5];          % e.g. [-0.5 0.5]
@@ -442,117 +579,6 @@ if ~isempty(panelm05_xlim)
     xlim(panelm05_xlim);
 elseif ~isempty(summary_xlim)
     xlim(summary_xlim);
-end
-
-%% 5.6.1) Figure -0.4: normal metrics + position
-panelm04_xlim = [45 63];
-panelm04_alpha_min = 0.15;
-panelm04_omega_bar = 0.15;
-panelm04_leak_bar = 0.07;
-panelm04_pos_ylim = [];
-panelm04_omega_ylim = [];
-panelm04_leak_ylim = [];
-panelm04_alpha_ylim = [panelm04_alpha_min 1.02];
-
-omega_alpha = panelm04_alpha_min + (1.0 - panelm04_alpha_min) ./ ...
-    (1.0 + (omega_n_logged ./ panelm04_omega_bar).^2);
-leak_alpha = panelm04_alpha_min + (1.0 - panelm04_alpha_min) ./ ...
-    (1.0 + (normal_velocity_leakage_logged ./ panelm04_leak_bar).^2);
-
-fm04 = figure('Name', 'Debug Normal Metrics and Position', 'NumberTitle', 'off', 'Color', 'w', ...
-    'Units', 'normalized', 'Position', [0.08 0.10 0.84 0.72]);
-
-p04_left = uipanel('Parent', fm04, 'Units', 'normalized', 'Position', [0.04 0.08 0.52 0.86], ...
-    'BackgroundColor', 'w', 'BorderType', 'none');
-tl04_left = tiledlayout(p04_left, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
-for i = 1:3
-    ax = nexttile(tl04_left);
-    plot(ax, time, pose_xyz(:,i), 'LineWidth', 1.2, 'Color', meas_color);
-    grid(ax, 'on');
-    xlabel(ax, 'time [s]');
-    ylabel(ax, sprintf('%s [m]', axis_names{i}));
-    title(ax, sprintf('Position %s', axis_names{i}));
-    if ~isempty(panelm04_xlim)
-        xlim(ax, panelm04_xlim);
-    elseif ~isempty(summary_xlim)
-        xlim(ax, summary_xlim);
-    end
-    if ~isempty(panelm04_pos_ylim)
-        ylim(ax, panelm04_pos_ylim);
-    end
-end
-
-p04_right = uipanel('Parent', fm04, 'Units', 'normalized', 'Position', [0.60 0.08 0.36 0.86], ...
-    'BackgroundColor', 'w', 'BorderType', 'none');
-p04_right_top = uipanel('Parent', p04_right, 'Units', 'normalized', 'Position', [0.00 0.52 1.00 0.48], ...
-    'BackgroundColor', 'w', 'BorderType', 'none');
-ax04_top = axes('Parent', p04_right_top);
-local_plot_ee_normal_xy(ax04_top, time, ee_pos, normal_est_xy, panelm04_xlim);
-
-p04_right_bottom = uipanel('Parent', p04_right, 'Units', 'normalized', 'Position', [0.00 0.00 1.00 0.48], ...
-    'BackgroundColor', 'w', 'BorderType', 'none');
-tl04_right = tiledlayout(p04_right_bottom, 2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
-
-ax04_omega = nexttile(tl04_right);
-plot(ax04_omega, time, omega_n_logged, 'LineWidth', 1.2, 'Color', acc_color);
-grid(ax04_omega, 'on');
-xlabel(ax04_omega, 'time [s]');
-ylabel(ax04_omega, '[1/s]');
-title(ax04_omega, '\omega_n');
-if ~isempty(panelm04_xlim)
-    xlim(ax04_omega, panelm04_xlim);
-elseif ~isempty(summary_xlim)
-    xlim(ax04_omega, summary_xlim);
-end
-if ~isempty(panelm04_omega_ylim)
-    ylim(ax04_omega, panelm04_omega_ylim);
-end
-
-ax04_omega_alpha = nexttile(tl04_right);
-plot(ax04_omega_alpha, time, omega_alpha, 'LineWidth', 1.2, 'Color', cmd_color);
-grid(ax04_omega_alpha, 'on');
-xlabel(ax04_omega_alpha, 'time [s]');
-ylabel(ax04_omega_alpha, '[-]');
-title(ax04_omega_alpha, sprintf('\\alpha_\\omega (\\alpha_{min}=%.2f, \\bar{\\omega}=%.2f)', ...
-    panelm04_alpha_min, panelm04_omega_bar));
-if ~isempty(panelm04_xlim)
-    xlim(ax04_omega_alpha, panelm04_xlim);
-elseif ~isempty(summary_xlim)
-    xlim(ax04_omega_alpha, summary_xlim);
-end
-if ~isempty(panelm04_alpha_ylim)
-    ylim(ax04_omega_alpha, panelm04_alpha_ylim);
-end
-
-ax04_leak = nexttile(tl04_right);
-plot(ax04_leak, time, normal_velocity_leakage_logged, 'LineWidth', 1.2, 'Color', pos_color);
-grid(ax04_leak, 'on');
-xlabel(ax04_leak, 'time [s]');
-ylabel(ax04_leak, '[-]');
-title(ax04_leak, 'normal velocity leakage');
-if ~isempty(panelm04_xlim)
-    xlim(ax04_leak, panelm04_xlim);
-elseif ~isempty(summary_xlim)
-    xlim(ax04_leak, summary_xlim);
-end
-if ~isempty(panelm04_leak_ylim)
-    ylim(ax04_leak, panelm04_leak_ylim);
-end
-
-ax04_leak_alpha = nexttile(tl04_right);
-plot(ax04_leak_alpha, time, leak_alpha, 'LineWidth', 1.2, 'Color', meas_color);
-grid(ax04_leak_alpha, 'on');
-xlabel(ax04_leak_alpha, 'time [s]');
-ylabel(ax04_leak_alpha, '[-]');
-title(ax04_leak_alpha, sprintf('\\alpha_{leak} (\\alpha_{min}=%.2f, \\bar{v}_{leak}=%.2f)', ...
-    panelm04_alpha_min, panelm04_leak_bar));
-if ~isempty(panelm04_xlim)
-    xlim(ax04_leak_alpha, panelm04_xlim);
-elseif ~isempty(summary_xlim)
-    xlim(ax04_leak_alpha, summary_xlim);
-end
-if ~isempty(panelm04_alpha_ylim)
-    ylim(ax04_leak_alpha, panelm04_alpha_ylim);
 end
 
 %% 5.5) Figure -1: accel/gyro inputs and offline attitude reconstruction
@@ -1162,7 +1188,12 @@ function local_plot_ee_normal_xy(ax, time, ee_pos, normal_xy, xlim_time)
     if numel(xlim_time) == 2 && all(isfinite(xlim_time))
         valid_time = time >= xlim_time(1) & time <= xlim_time(2);
     end
-    valid = valid_time & all(isfinite(ee_pos), 2);
+
+    ee_masked = ee_pos;
+    normal_masked = normal_xy;
+    ee_masked(~valid_time, :) = nan;
+    normal_masked(~valid_time, :) = nan;
+    valid = all(isfinite(ee_masked), 2);
 
     cla(ax);
     hold(ax, 'on');
@@ -1179,7 +1210,7 @@ function local_plot_ee_normal_xy(ax, time, ee_pos, normal_xy, xlim_time)
     end
 
     time_valid = time(valid);
-    ee_valid = ee_pos(valid,:);
+    ee_valid = ee_masked(valid,:);
     if numel(time_valid) >= 2
         cmap = turbo(256);
         cdata = linspace(0.0, 1.0, size(ee_valid,1));
@@ -1207,16 +1238,103 @@ function local_plot_ee_normal_xy(ax, time, ee_pos, normal_xy, xlim_time)
         plot(ax, ee_valid(:,1), ee_valid(:,2), 'LineWidth', 1.6, 'Color', [0.0000 0.4470 0.7410]);
     end
 
-    quiver_idx = find(valid & all(isfinite(normal_xy), 2));
+    quiver_idx = find(valid & all(isfinite(normal_masked), 2));
     quiver_step = max(1, floor(numel(quiver_idx) / 25));
     quiver_idx = quiver_idx(1:quiver_step:end);
     if ~isempty(quiver_idx)
-        quiver(ax, ee_pos(quiver_idx,1), ee_pos(quiver_idx,2), ...
-            normal_xy(quiver_idx,1), normal_xy(quiver_idx,2), 0.15, ...
+        quiver(ax, ee_masked(quiver_idx,1), ee_masked(quiver_idx,2), ...
+            normal_masked(quiver_idx,1), normal_masked(quiver_idx,2), 0.15, ...
             'Color', [0.8500 0.3250 0.0980], 'LineWidth', 1.0, 'MaxHeadSize', 1.5);
     end
 
+    local_set_planar_axis_limits(ax, ee_valid(:, [1 2]));
     legend(ax, {'EE trajectory', 'start', 'end', 'normal est (XY proj)'}, 'Location', 'best');
+end
+
+function local_plot_ee_normal_xz(ax, time, ee_pos, normal_world, xlim_time)
+    valid_time = true(size(time));
+    if numel(xlim_time) == 2 && all(isfinite(xlim_time))
+        valid_time = time >= xlim_time(1) & time <= xlim_time(2);
+    end
+
+    ee_masked = ee_pos;
+    normal_masked = normal_world;
+    ee_masked(~valid_time, :) = nan;
+    normal_masked(~valid_time, :) = nan;
+    valid = all(isfinite(ee_masked), 2);
+
+    cla(ax);
+    hold(ax, 'on');
+    grid(ax, 'on');
+    axis(ax, 'equal');
+    xlabel(ax, 'X [m]');
+    ylabel(ax, 'Z [m]');
+    title(ax, 'Normal estimation and EE trajectory (XZ plane)');
+
+    if ~any(valid)
+        text(ax, 0.5, 0.5, 'EE position is not available', ...
+            'Units', 'normalized', 'HorizontalAlignment', 'center');
+        return;
+    end
+
+    time_valid = time(valid);
+    ee_valid = ee_masked(valid,:);
+    if numel(time_valid) >= 2
+        cmap = turbo(256);
+        cdata = linspace(0.0, 1.0, size(ee_valid,1));
+        surface(ax, ...
+            [ee_valid(:,1), ee_valid(:,1)], ...
+            [ee_valid(:,3), ee_valid(:,3)], ...
+            zeros(size(ee_valid,1), 2), ...
+            [cdata(:), cdata(:)], ...
+            'FaceColor', 'none', 'EdgeColor', 'interp', 'LineWidth', 2.0);
+        scatter(ax, ee_valid(1,1), ee_valid(1,3), 42, cmap(1,:), 'filled', 'MarkerEdgeColor', 'k');
+        scatter(ax, ee_valid(end,1), ee_valid(end,3), 42, cmap(end,:), 'filled', 'MarkerEdgeColor', 'k');
+        colormap(ax, cmap);
+        cb = colorbar(ax);
+        cb.Label.String = 'time [s]';
+        cb.Ticks = linspace(0, 1, 5);
+        cb.TickLabels = compose('%.1f', linspace(time_valid(1), time_valid(end), 5));
+        caxis(ax, [0 1]);
+    else
+        plot(ax, ee_valid(:,1), ee_valid(:,3), 'LineWidth', 1.6, 'Color', [0.0000 0.4470 0.7410]);
+    end
+
+    quiver_idx = find(valid & all(isfinite(normal_masked), 2));
+    quiver_step = max(1, floor(numel(quiver_idx) / 25));
+    quiver_idx = quiver_idx(1:quiver_step:end);
+    if ~isempty(quiver_idx)
+        quiver(ax, ee_masked(quiver_idx,1), ee_masked(quiver_idx,3), ...
+            normal_masked(quiver_idx,1), normal_masked(quiver_idx,3), 0.15, ...
+            'Color', [0.8500 0.3250 0.0980], 'LineWidth', 1.0, 'MaxHeadSize', 1.5);
+    end
+
+    local_set_planar_axis_limits(ax, ee_valid(:, [1 3]));
+    legend(ax, {'EE trajectory', 'start', 'end', 'normal est (XZ proj)'}, 'Location', 'best');
+end
+
+function local_set_planar_axis_limits(ax, planar_points)
+    if isempty(planar_points) || size(planar_points, 2) ~= 2
+        return;
+    end
+
+    valid = all(isfinite(planar_points), 2);
+    planar_points = planar_points(valid, :);
+    if isempty(planar_points)
+        return;
+    end
+
+    mins = min(planar_points, [], 1);
+    maxs = max(planar_points, [], 1);
+    spans = maxs - mins;
+    max_span = max(spans);
+    if ~isfinite(max_span) || max_span < 1.0e-6
+        max_span = 0.05;
+    end
+    pads = max(0.05 * max_span, 0.01);
+
+    xlim(ax, [mins(1) - pads, maxs(1) + pads]);
+    ylim(ax, [mins(2) - pads, maxs(2) + pads]);
 end
 
 function local_handle_ee_xy_click(src, ~)

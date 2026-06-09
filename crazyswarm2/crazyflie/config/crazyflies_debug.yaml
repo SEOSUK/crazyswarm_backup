@@ -152,13 +152,13 @@ robot_types:
 
       pid_attitude:
         roll_kp: 6.5 # Default: 6.0
-        pitch_kp: 8.5 # Default: 6.0
+        pitch_kp: 6.5 # Default: 6.0
         yaw_kp: 12.5 # Default: 6.0
         roll_ki: 2.0 # Default: 3.0
         pitch_ki: 2.0 # Default: 3.0
         yaw_ki: 0.7 # Default: 1.0
         roll_kd: 0.3 # Default: 0.0
-        pitch_kd: 0.7 # Default: 0.0
+        pitch_kd: 0.3 # Default: 0.0
         yaw_kd: 1.0 # Default: 0.35
         roll_kff: 0.0 # Default: 0.0
         pitch_kff: 0.0 # Default: 0.0
@@ -167,13 +167,13 @@ robot_types:
         attFiltCut: 15.0 # Default: 15.0 Hz, attitude PID D-term LPF cutoff
       pid_rate:
         roll_kp: 220.0 # Default: 200.0
-        pitch_kp: 250.0 # Default: 200.0
+        pitch_kp: 220.0 # Default: 200.0
         yaw_kp: 300.0 # Default: 120.0
         roll_ki: 300.0 # Default: 400.0
         pitch_ki: 300.0 # Default: 400.0
-        yaw_ki: 20.0 # Default: 16.7
+        yaw_ki: 15.0 # Default: 16.7
         roll_kd: 2.5 # Default: 2.5
-        pitch_kd: 3.5 # Default: 2.5
+        pitch_kd: 2.5 # Default: 2.5
         yaw_kd: 3.5 # Default: 0.0
         roll_kff: 0.0 # Default: 0.0
         pitch_kff: 0.0 # Default: 0.0

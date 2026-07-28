@@ -13,6 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(crazyflie_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -55,6 +56,7 @@ add_executable(rviz_visual src/rviz_visual.cpp)
 ament_target_dependencies(rviz_visual
   rclcpp
   std_msgs
+  std_srvs
   tf2_ros
   visualization_msgs  
 )

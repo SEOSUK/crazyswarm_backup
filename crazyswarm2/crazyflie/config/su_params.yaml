@@ -4,8 +4,8 @@ robot_types:
       su_wrench:
         mass: 0.043957  # observer mass model [kg]
         Keps: 800.0  # consistency residual correction gain
-        comOffX: -0.000885  # body-frame CoM offset x [m]
-        comOffY: 0.000289  # body-frame CoM offset y [m]
+        comOffX: -0.000231  # body-frame CoM offset x [m]
+        comOffY: -0.000672  # body-frame CoM offset y [m]
         comOffZ: 0.0  # body-frame CoM offset z [m]
         rOffX: 0.08
         rOffY: 0.0
@@ -20,13 +20,13 @@ robot_types:
 
         preloadEn: 1  # 0: velocity-mode yaw follows server command, 1: velocity-mode yaw aligns to estimated normal direction
         preloadGf: 15.0  # effective gain from normal force error to normal velocity command
-        preloadGv: 3.0  # effective gain from normal velocity leakage to command
+        preloadGv: 5.0  # effective gain from normal velocity leakage to command
         preloadNu: 0.3  # [m/s], symmetric saturation bound for normal velocity command
 
-        alphaMin: 1.0  # [0..1], minimum alpha_frame for tangential velocity command gating
-        alphaBar: 0.15  # [+] omega_n bar, [-] normal_velocity_leakage bar, 0 disables alpha_frame gating
+        alphaMin: 0.1  # [0..1], minimum alpha_frame for tangential velocity command gating
+        alphaBar: -0.007  # [+] omega_n bar, [-] normal_velocity_leakage bar, 0 disables alpha_frame gating
 
-        normBeta: 2.0  # [1/s] beta ≈ 2*pi*f_c, decay rate of the normal-axis memory matrix
+        normBeta: 1.5  # [1/s] beta ≈ 2*pi*f_c, decay rate of the normal-axis memory matrix
         normEpsG: 0.0004  # [m^2/s^2], velocity-projection regularization epsilon_g
         normEpsF: 0.015  # [N], minimum force evidence norm epsilon_f
 

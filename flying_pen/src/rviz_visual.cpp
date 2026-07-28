@@ -1,5 +1,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
+#include "std_srvs/srv/trigger.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
@@ -56,6 +57,14 @@ public:
     sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
       data_topic_, qos, std::bind(&RvizVisual::dataCallback, this, std::placeholders::_1));
 
+    clear_history_srv_ = this->create_service<std_srvs::srv::Trigger>(
+      "~/clear_history",
+      std::bind(
+        &RvizVisual::clearHistoryServiceCallback,
+        this,
+        std::placeholders::_1,
+        std::placeholders::_2));
+
     timer_ = this->create_wall_timer(10ms, std::bind(&RvizVisual::publishTfTimer, this));
 
     raw_cmd_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/cmd_position_marker", 10);
@@ -65,6 +74,7 @@ public:
     normal_est_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/normal_est_marker", 10);
     acc_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/acc_marker", 10);
     vel_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/vel_marker", 10);
+    ee_vel_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/ee_vel_marker", 10);
     wall_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/wall_marker", 10);
     ee_history_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/ee_trajectory_history", 10);
     contact_history_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -79,6 +89,7 @@ public:
     normal_est_.setZero();
     world_vel_.setZero();
     world_acc_.setZero();
+    ee_vel_used_.setZero();
 
     RCLCPP_INFO(get_logger(), "rviz_visual started. subscribing %s", data_topic_.c_str());
   }
@@ -86,10 +97,10 @@ public:
 private:
   void dataCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
   {
-    if (msg->data.size() < 79) {
+    if (msg->data.size() < 82) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000,
-        "msg size too small (%zu), expected >= 79", msg->data.size());
+        "msg size too small (%zu), expected >= 82", msg->data.size());
       return;
     }
 
@@ -130,12 +141,17 @@ private:
     normal_est_[1] = msg->data[77];
     normal_est_[2] = msg->data[78];
 
+    ee_vel_used_[0] = msg->data[79];
+    ee_vel_used_[1] = msg->data[80];
+    ee_vel_used_[2] = msg->data[81];
+
     pose_valid_ = isFiniteVector(pos_) && isFiniteVector(rpy_meas_);
   }
 
   void publishTfTimer()
   {
     const auto stamp = get_clock()->now();
+    maybeHandleHistoryViewerReset(stamp);
     publishWall(stamp);
     pruneSmoothTrajectoryHistory(stamp);
     const auto expired_history_ids = pruneFrameHistory(stamp);
@@ -211,6 +227,11 @@ private:
     p0.y = pos_[1];
     p0.z = pos_[2];
 
+    geometry_msgs::msg::Point p_ee;
+    p_ee.x = ee_pos.x();
+    p_ee.y = ee_pos.y();
+    p_ee.z = ee_pos.z();
+
     geometry_msgs::msg::Point p_cmd;
     p_cmd.x = cmd_pos_[0];
     p_cmd.y = cmd_pos_[1];
@@ -224,11 +245,15 @@ private:
     publishSphere(raw_cmd_pub_, stamp, "world", "cmd_position", 0, p_cmd, 0.05, 0.0f, 0.45f, 0.90f, 0.85f);
     publishSphere(fw_cmd_pub_, stamp, "world", "fw_cmd_position", 0, p_fw_cmd, 0.06, 0.90f, 0.35f, 0.10f, 0.90f);
 
+    Eigen::Vector3d normal_est_display = normal_est_;
+    normal_est_display.z() *= 1.3;
+
     publishArrow(raw_force_pub_, stamp, "world", "mob_force_pure", 0, p0, mob_force_pure_, 10.0, 0.02, 0.04, 0.06, 1.0f, 0.2f, 0.2f);
     publishArrow(scaled_force_pub_, stamp, "world", "mob_force_residual", 0, p0, mob_force_residual_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
-    publishArrow(normal_est_pub_, stamp, "world", "normal_estimation", 0, p0, normal_est_, 0.25, 0.02, 0.04, 0.06, 0.1f, 0.8f, 0.2f);
+    publishArrow(normal_est_pub_, stamp, "world", "normal_estimation", 0, p0, normal_est_display, 0.35, 0.02, 0.04, 0.06, 0.1f, 0.8f, 0.2f);
     publishArrow(acc_pub_, stamp, "world", "acceleration", 0, p0, world_acc_, 0.5, 0.015, 0.03, 0.05, 0.0f, 0.0f, 1.0f);
     publishArrow(vel_pub_, stamp, "world", "velocity", 0, p0, world_vel_, 1.0, 0.015, 0.03, 0.05, 1.0f, 0.8f, 0.0f);
+    publishArrow(ee_vel_pub_, stamp, "world", "ee_velocity", 0, p_ee, ee_vel_used_, 1.0, 0.015, 0.03, 0.05, 0.0f, 0.9f, 0.9f);
     pushSmoothTrajectorySample(ee_pos, stamp);
     const auto new_history_sample = pushFrameHistorySample(ee_pos, normal_frame_quat, stamp);
     publishFrameHistoryDelta(stamp, expired_history_ids, new_history_sample);
@@ -281,6 +306,7 @@ private:
     FrameAxes axes;
 
     Eigen::Vector3d x_axis = normal_est_;
+    x_axis.z() *= 1.3;
     const double x_norm = x_axis.norm();
     if (x_norm < 1e-6) {
       return axes;
@@ -338,6 +364,62 @@ private:
         break;
       }
       smooth_trajectory_history_.pop_front();
+    }
+  }
+
+  void maybeHandleHistoryViewerReset(const rclcpp::Time & stamp)
+  {
+    const size_t ee_history_subs = ee_history_pub_->get_subscription_count();
+    const size_t contact_history_subs = contact_history_pub_->get_subscription_count();
+
+    const bool ee_reconnected = last_ee_history_sub_count_ == 0 && ee_history_subs > 0;
+    const bool contact_reconnected =
+      last_contact_history_sub_count_ == 0 && contact_history_subs > 0;
+
+    last_ee_history_sub_count_ = ee_history_subs;
+    last_contact_history_sub_count_ = contact_history_subs;
+
+    if (!ee_reconnected && !contact_reconnected) {
+      return;
+    }
+
+    clearHistoryMarkers(stamp);
+    clearHistoryState();
+  }
+
+  void clearHistoryState()
+  {
+    smooth_trajectory_history_.clear();
+    frame_history_.clear();
+    next_history_sample_id_ = 0;
+    last_history_sample_time_ = rclcpp::Time{0, 0, RCL_ROS_TIME};
+    last_history_publish_time_ = rclcpp::Time{0, 0, RCL_ROS_TIME};
+  }
+
+  void clearHistoryServiceCallback(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+  {
+    const auto stamp = get_clock()->now();
+    clearHistoryMarkers(stamp);
+    clearHistoryState();
+    response->success = true;
+    response->message = "rviz history cleared";
+    RCLCPP_INFO(get_logger(), "Cleared RViz history via service call.");
+  }
+
+  void clearHistoryMarkers(const rclcpp::Time & stamp)
+  {
+    ee_history_pub_->publish(makeDeleteMarker("ee_trajectory_history", 1000, stamp));
+
+    visualization_msgs::msg::MarkerArray out;
+    for (const auto & sample : frame_history_) {
+      out.markers.push_back(makeDeleteMarker("contact_frame_history_x_segment", sample.id, stamp));
+      out.markers.push_back(makeDeleteMarker("contact_frame_history_y_segment", sample.id, stamp));
+      out.markers.push_back(makeDeleteMarker("contact_frame_history_z_segment", sample.id, stamp));
+    }
+    if (!out.markers.empty()) {
+      contact_history_pub_->publish(out);
     }
   }
 
@@ -678,6 +760,7 @@ private:
   };
 
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr sub_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_history_srv_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
@@ -688,6 +771,7 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr normal_est_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr acc_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr vel_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr ee_vel_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr wall_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr ee_history_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr contact_history_pub_;
@@ -702,6 +786,7 @@ private:
   Eigen::Vector3d normal_est_;
   Eigen::Vector3d world_vel_;
   Eigen::Vector3d world_acc_;
+  Eigen::Vector3d ee_vel_used_;
   std::array<double, 3> ee_offset_;
   std::string data_topic_;
   double history_sample_period_{0.2};
@@ -709,6 +794,8 @@ private:
   double history_duration_{30.0};
   double history_frame_axis_scale_{0.3};
   int next_history_sample_id_{0};
+  size_t last_ee_history_sub_count_{0};
+  size_t last_contact_history_sub_count_{0};
   rclcpp::Time last_history_sample_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_history_publish_time_{0, 0, RCL_ROS_TIME};
   std::deque<TrajectorySample> smooth_trajectory_history_;

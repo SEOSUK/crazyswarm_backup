@@ -106,7 +106,7 @@ public:
   // 76..78 : normal_estimation xyz [-], estimated world normal vector
   // 79..81 : ee_vel_used xyz [m/s], 1 Hz LPF contact/end-effector velocity used in normal estimation
   // 82     : omega_n [1/s], 1 Hz LPF norm of d/dt(normal_est)
-  // 83     : normal_velocity_leakage [-], 1 Hz LPF n_hat^T v_EE / (|v_EE| + 1e-6)
+  // 83     : normal_velocity_leakage [m/s], 1 Hz LPF |n_hat^T v_EE|
   // 84     : stabilizer loop elapsed time [us]
   // 85     : stabilizer loop elapsed time max since boot [us]
   // 86     : alpha_frame [-], tangential command gating factor

@@ -57,6 +57,7 @@ ament_target_dependencies(rviz_visual
   rclcpp
   std_msgs
   std_srvs
+  crazyflie_interfaces
   tf2_ros
   visualization_msgs  
 )

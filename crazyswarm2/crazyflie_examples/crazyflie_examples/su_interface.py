@@ -148,7 +148,7 @@ class SuInterface(Node):
         current_com_off_y = self.current_com_off_y
 
         measured_mass = hover_thrust / HOVER_GRAVITY
-        mass = self.current_mass
+        mass = measured_mass
         # tau_input already includes the currently configured CoM compensation term.
         # In hover, the remaining body-torque mismatch corresponds to the error
         # between the current CoM estimate and the true CoM offset.
@@ -187,7 +187,7 @@ class SuInterface(Node):
         self.get_logger().info(
             'HOVER CALIBRATION local result: samples=%d, thrust=%.4f N, tau_input=(%.5f, %.5f) N*m, '
             'current comOffXY=(%.5f, %.5f) m, delta comOffXY=(%.5f, %.5f) m, '
-            'measured mass=%.4f kg, kept mass=%.4f kg, new comOffXY=(%.5f, %.5f) m',
+            'measured mass=%.4f kg, mass=%.4f kg, new comOffXY=(%.5f, %.5f) m',
             calibration['sample_count'],
             calibration['hover_thrust'],
             calibration['tau_x'],

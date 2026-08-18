@@ -12,6 +12,7 @@ from rcl_interfaces.srv import SetParameters
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
+from std_srvs.srv import Trigger
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QStyle
@@ -90,6 +91,7 @@ class LogPlayerControlNode(Node):
 
         self.csv_player_client = self.create_client(SetParameters, "/csv_player/set_parameters")
         self.rviz_visual_client = self.create_client(SetParameters, "/rviz_visual/set_parameters")
+        self.rviz_clear_history_client = self.create_client(Trigger, "/rviz_visual/clear_history")
         self.latest_status = {
             "loaded": False,
             "progress": 0.0,
@@ -173,6 +175,22 @@ class LogPlayerControlNode(Node):
             make_bool_parameter("paused", False),
         ])
 
+    def clear_rviz_history(self) -> bool:
+        if not self.rviz_clear_history_client.service_is_ready():
+            return False
+        future = self.rviz_clear_history_client.call_async(Trigger.Request())
+        future.add_done_callback(self._log_clear_history_result)
+        return True
+
+    def _log_clear_history_result(self, future) -> None:
+        try:
+            response = future.result()
+        except Exception as exc:  # pragma: no cover
+            self.get_logger().warning(f"Failed to clear RViz history: {exc}")
+            return
+        if not response.success:
+            self.get_logger().warning(f"RViz history clear failed: {response.message}")
+
     def _log_parameter_result(self, target_name: str, future) -> None:
         try:
             response = future.result()
@@ -242,10 +260,13 @@ class LogPlayerControlWindow(QMainWindow):
 
         self.time_label = QLabel("0.00 s / 0.00 s")
         self.rows_label = QLabel("row 0 / 0")
+        self.clear_history_button = QPushButton("Clear History")
+        self.clear_history_button.clicked.connect(self.on_clear_history)
         controls.addWidget(QLabel("Position"), 0, 2)
         controls.addWidget(self.time_label, 0, 3)
         controls.addWidget(QLabel("Rows"), 1, 2)
         controls.addWidget(self.rows_label, 1, 3)
+        controls.addWidget(self.clear_history_button, 0, 4, 2, 1)
         root.addLayout(controls)
 
         playback_row = QHBoxLayout()
@@ -310,6 +331,9 @@ class LogPlayerControlWindow(QMainWindow):
         if not self.ros_node.rviz_visual_client.service_is_ready():
             self.ros_node.rviz_visual_client.wait_for_service(timeout_sec=0.0)
             return
+        if not self.ros_node.rviz_clear_history_client.service_is_ready():
+            self.ros_node.rviz_clear_history_client.wait_for_service(timeout_sec=0.0)
+            return
         self.player_wait_timer.stop()
         self.ros_node.push_initial_state()
         self.status_label.setText("Connected to csv_player and rviz_visual")
@@ -351,6 +375,12 @@ class LogPlayerControlWindow(QMainWindow):
 
     def on_restart(self) -> None:
         self.ros_node.restart()
+
+    def on_clear_history(self) -> None:
+        if self.ros_node.clear_rviz_history():
+            self.status_label.setText("Clearing RViz contact history")
+        else:
+            self.status_label.setText("Waiting for rviz_visual clear_history service")
 
     def on_skip_backward(self) -> None:
         self.ros_node.skip_relative(-self.seek_step_spin.value())

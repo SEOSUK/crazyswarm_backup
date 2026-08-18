@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-LOG_ROOT = Path("/home/seosuk/hitl_ws/src/flying_pen/bag/logging")
+LOG_ROOT = Path(__file__).resolve().parents[2] / "flying_pen" / "bag" / "logging"
 
 
 def get_log_root() -> Path:
@@ -50,6 +50,14 @@ def make_string_parameter(name: str, value: str) -> ParameterMsg:
     msg.name = name
     msg.value.type = ParameterType.PARAMETER_STRING
     msg.value.string_value = value
+    return msg
+
+
+def make_bool_parameter(name: str, value: bool) -> ParameterMsg:
+    msg = ParameterMsg()
+    msg.name = name
+    msg.value.type = ParameterType.PARAMETER_BOOL
+    msg.value.bool_value = bool(value)
     return msg
 
 
@@ -78,6 +86,7 @@ class LogPlayerControlNode(Node):
         self.declare_parameter("playback_rate", 1.0)
         self.declare_parameter("status_topic", "/csv_player/status")
         self.declare_parameter("wall_x_offset", 0.0)
+        self.declare_parameter("seek_step_sec", 5.0)
 
         self.csv_player_client = self.create_client(SetParameters, "/csv_player/set_parameters")
         self.rviz_visual_client = self.create_client(SetParameters, "/rviz_visual/set_parameters")
@@ -89,6 +98,7 @@ class LogPlayerControlNode(Node):
             "playback_rate": float(self.get_parameter("playback_rate").value),
             "row_count": 0.0,
             "row_index": 0.0,
+            "paused": False,
         }
 
         status_topic = str(self.get_parameter("status_topic").value)
@@ -106,6 +116,7 @@ class LogPlayerControlNode(Node):
             "playback_rate": float(data[4]),
             "row_count": float(data[5]),
             "row_index": float(data[6]),
+            "paused": data[7] > 0.5 if len(data) > 7 else False,
         }
 
     def push_initial_state(self) -> None:
@@ -140,6 +151,27 @@ class LogPlayerControlNode(Node):
 
     def seek_ratio(self, ratio: float) -> None:
         self.set_csv_player_parameters([make_double_parameter("seek_ratio", ratio)])
+
+    def seek_time(self, time_sec: float) -> None:
+        self.set_csv_player_parameters([make_double_parameter("seek_time_sec", time_sec)])
+
+    def skip_relative(self, delta_sec: float) -> None:
+        status = self.latest_status
+        target_time = status["current_time_sec"] + delta_sec
+        target_time = max(0.0, min(status["total_duration_sec"], target_time))
+        self.seek_time(target_time)
+
+    def play(self) -> None:
+        self.set_csv_player_parameters([make_bool_parameter("paused", False)])
+
+    def pause(self) -> None:
+        self.set_csv_player_parameters([make_bool_parameter("paused", True)])
+
+    def restart(self) -> None:
+        self.set_csv_player_parameters([
+            make_double_parameter("seek_ratio", 0.0),
+            make_bool_parameter("paused", False),
+        ])
 
     def _log_parameter_result(self, target_name: str, future) -> None:
         try:
@@ -216,17 +248,49 @@ class LogPlayerControlWindow(QMainWindow):
         controls.addWidget(self.rows_label, 1, 3)
         root.addLayout(controls)
 
-        slider_row = QHBoxLayout()
+        playback_row = QHBoxLayout()
+        self.play_button = QPushButton("Play")
+        self.pause_button = QPushButton("Pause")
+        self.restart_button = QPushButton("Restart")
+        self.back_button = QPushButton()
+        self.forward_button = QPushButton()
+        self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.pause_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+        self.restart_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
+        self.back_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekBackward))
+        self.forward_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
+        self.play_button.clicked.connect(self.on_play)
+        self.pause_button.clicked.connect(self.on_pause)
+        self.restart_button.clicked.connect(self.on_restart)
+        self.back_button.clicked.connect(self.on_skip_backward)
+        self.forward_button.clicked.connect(self.on_skip_forward)
+
+        self.seek_step_spin = QDoubleSpinBox()
+        self.seek_step_spin.setRange(0.1, 3600.0)
+        self.seek_step_spin.setDecimals(1)
+        self.seek_step_spin.setSingleStep(1.0)
+        self.seek_step_spin.setValue(float(self.ros_node.get_parameter("seek_step_sec").value))
+        self.seek_step_spin.setSuffix(" s")
+        self.seek_step_spin.valueChanged.connect(self.update_skip_button_text)
+        self.update_skip_button_text(self.seek_step_spin.value())
+
         self.slider = ClickSeekSlider(Qt.Horizontal)
         self.slider.setRange(0, 1000)
         self.slider.sliderPressed.connect(self.on_slider_pressed)
         self.slider.sliderReleased.connect(self.on_slider_released)
         self.slider.sliderMoved.connect(self.on_slider_moved)
         self.slider_value_label = QLabel("0.0 %")
-        slider_row.addWidget(QLabel("Seek"))
-        slider_row.addWidget(self.slider, stretch=1)
-        slider_row.addWidget(self.slider_value_label)
-        root.addLayout(slider_row)
+        playback_row.addWidget(self.play_button)
+        playback_row.addWidget(self.pause_button)
+        playback_row.addWidget(self.restart_button)
+        playback_row.addWidget(self.back_button)
+        playback_row.addWidget(self.forward_button)
+        playback_row.addWidget(QLabel("Step"))
+        playback_row.addWidget(self.seek_step_spin)
+        playback_row.addWidget(QLabel("Seek"))
+        playback_row.addWidget(self.slider, stretch=1)
+        playback_row.addWidget(self.slider_value_label)
+        root.addLayout(playback_row)
 
         self.status_label = QLabel("Waiting for csv_player...")
         root.addWidget(self.status_label)
@@ -279,6 +343,26 @@ class LogPlayerControlWindow(QMainWindow):
     def on_wall_x_changed(self, value: float) -> None:
         self.ros_node.set_rviz_visual_parameters([make_double_parameter("wall_x_offset", value)])
 
+    def on_play(self) -> None:
+        self.ros_node.play()
+
+    def on_pause(self) -> None:
+        self.ros_node.pause()
+
+    def on_restart(self) -> None:
+        self.ros_node.restart()
+
+    def on_skip_backward(self) -> None:
+        self.ros_node.skip_relative(-self.seek_step_spin.value())
+
+    def on_skip_forward(self) -> None:
+        self.ros_node.skip_relative(self.seek_step_spin.value())
+
+    def update_skip_button_text(self, value: float) -> None:
+        step_text = f"{value:g}s"
+        self.back_button.setText(f"-{step_text}")
+        self.forward_button.setText(f"+{step_text}")
+
     def on_slider_pressed(self) -> None:
         self.slider_is_active = True
 
@@ -318,8 +402,9 @@ class LogPlayerControlWindow(QMainWindow):
             self.slider_value_label.setText(f"{slider_value / 10.0:.1f} %")
 
         if status["loaded"]:
+            state_text = "Paused" if status["paused"] else "Playing"
             self.status_label.setText(
-                f"Loaded | {status['playback_rate']:.2f}x | {total_duration:.2f} s total"
+                f"{state_text} | {status['playback_rate']:.2f}x | {total_duration:.2f} s total"
             )
         else:
             self.status_label.setText("CSV not loaded")

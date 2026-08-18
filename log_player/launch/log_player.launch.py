@@ -25,6 +25,7 @@ def generate_launch_description():
         robot_description = f.read()
 
     csv_cfg = cfg.get("csv_playback", {}).get("ros__parameters", {})
+    ui_cfg = cfg.get("log_player_control", {}).get("ros__parameters", {})
     launch_rviz = bool(csv_cfg.get("launch_rviz", False))
     su_wrench_cfg = (
         shared_su_cfg.get("robot_types", {})
@@ -51,7 +52,8 @@ def generate_launch_description():
         "csv_path": "",
         "playback_rate": float(csv_cfg.get("playback_rate", 1.0)),
         "status_topic": "/csv_player/status",
-        "wall_x_offset": 0.0,
+        "wall_x_offset": float(ui_cfg.get("wall_x_offset", 0.0)),
+        "seek_step_sec": float(ui_cfg.get("seek_step_sec", 5.0)),
     }
 
     nodes = [

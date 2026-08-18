@@ -249,11 +249,11 @@ private:
     normal_est_display.z() *= 1.3;
 
     publishArrow(raw_force_pub_, stamp, "world", "mob_force_pure", 0, p0, mob_force_pure_, 10.0, 0.02, 0.04, 0.06, 1.0f, 0.2f, 0.2f);
-    publishArrow(scaled_force_pub_, stamp, "world", "mob_force_residual", 0, p0, mob_force_residual_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
+    publishArrow(scaled_force_pub_, stamp, "world", "mob_force_residual", 0, p_ee, -mob_force_residual_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
     publishArrow(normal_est_pub_, stamp, "world", "normal_estimation", 0, p0, normal_est_display, 0.35, 0.02, 0.04, 0.06, 0.1f, 0.8f, 0.2f);
     publishArrow(acc_pub_, stamp, "world", "acceleration", 0, p0, world_acc_, 0.5, 0.015, 0.03, 0.05, 0.0f, 0.0f, 1.0f);
     publishArrow(vel_pub_, stamp, "world", "velocity", 0, p0, world_vel_, 1.0, 0.015, 0.03, 0.05, 1.0f, 0.8f, 0.0f);
-    publishArrow(ee_vel_pub_, stamp, "world", "ee_velocity", 0, p_ee, ee_vel_used_, 1.0, 0.015, 0.03, 0.05, 0.0f, 0.9f, 0.9f);
+    publishArrow(ee_vel_pub_, stamp, "world", "ee_velocity", 0, p_ee, ee_vel_used_, 2.0, 0.015, 0.03, 0.05, 0.0f, 0.9f, 0.9f);
     pushSmoothTrajectorySample(ee_pos, stamp);
     const auto new_history_sample = pushFrameHistorySample(ee_pos, normal_frame_quat, stamp);
     publishFrameHistoryDelta(stamp, expired_history_ids, new_history_sample);

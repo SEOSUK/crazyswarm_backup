@@ -20,6 +20,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(motion_capture_tracking_interfaces REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(ros_environment REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 
 if (DEFINED ENV{ROS_DISTRO})
   set(ROS_DISTRO_VALUE "$ENV{ROS_DISTRO}")
@@ -73,6 +74,7 @@ ament_target_dependencies(crazyflie_server
   crazyflie_interfaces
   geometry_msgs
   motion_capture_tracking_interfaces
+  ament_index_cpp
 )
 
 # # scan

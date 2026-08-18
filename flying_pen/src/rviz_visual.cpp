@@ -1,6 +1,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 #include "std_srvs/srv/trigger.hpp"
+#include "crazyflie_interfaces/msg/log_data_generic.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
@@ -44,6 +45,8 @@ public:
     tf_broadcaster_(std::make_shared<tf2_ros::TransformBroadcaster>(this))
   {
     data_topic_ = this->declare_parameter<std::string>("topic", "/data_logging_msg_debug");
+    ee_velocity_topic_ = this->declare_parameter<std::string>("ee_velocity_topic", "cf2/cf_su_ee_velocity");
+    ee_cmd_topic_ = this->declare_parameter<std::string>("ee_cmd_topic", "cf2/cf_su_ee_cmd");
     history_sample_period_ = this->declare_parameter<double>("history_sample_period", 0.2);
     history_publish_period_ = this->declare_parameter<double>("history_publish_period", 0.10);
     history_duration_ = this->declare_parameter<double>("history_duration", 30.0);
@@ -56,6 +59,10 @@ public:
 
     sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
       data_topic_, qos, std::bind(&RvizVisual::dataCallback, this, std::placeholders::_1));
+    ee_velocity_sub_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      ee_velocity_topic_, 10, std::bind(&RvizVisual::eeVelocityCallback, this, std::placeholders::_1));
+    ee_cmd_sub_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      ee_cmd_topic_, 10, std::bind(&RvizVisual::eeCmdCallback, this, std::placeholders::_1));
 
     clear_history_srv_ = this->create_service<std_srvs::srv::Trigger>(
       "~/clear_history",
@@ -90,8 +97,14 @@ public:
     world_vel_.setZero();
     world_acc_.setZero();
     ee_vel_used_.setZero();
+    ee_cmd_pos_.setZero();
 
-    RCLCPP_INFO(get_logger(), "rviz_visual started. subscribing %s", data_topic_.c_str());
+    RCLCPP_INFO(
+      get_logger(),
+      "rviz_visual started. subscribing %s, %s and %s",
+      data_topic_.c_str(),
+      ee_velocity_topic_.c_str(),
+      ee_cmd_topic_.c_str());
   }
 
 private:
@@ -146,6 +159,30 @@ private:
     ee_vel_used_[2] = msg->data[81];
 
     pose_valid_ = isFiniteVector(pos_) && isFiniteVector(rpy_meas_);
+  }
+
+  void eeVelocityCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (!msg || msg->values.size() < 3) {
+      return;
+    }
+
+    ee_vel_used_[0] = msg->values[0];
+    ee_vel_used_[1] = msg->values[1];
+    ee_vel_used_[2] = msg->values[2];
+  }
+
+  void eeCmdCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (!msg || msg->values.size() < 4) {
+      return;
+    }
+
+    ee_cmd_pos_[0] = msg->values[0];
+    ee_cmd_pos_[1] = msg->values[1];
+    ee_cmd_pos_[2] = msg->values[2];
+    ee_cmd_yaw_deg_ = msg->values[3];
+    ee_cmd_valid_ = isFiniteVector(ee_cmd_pos_) && std::isfinite(ee_cmd_yaw_deg_);
   }
 
   void publishTfTimer()
@@ -221,6 +258,24 @@ private:
     tf_fw_cmd.transform.translation.z = fw_cmd_pos_[2];
     tf_fw_cmd.transform.rotation = tf_cmd.transform.rotation;
     tf_broadcaster_->sendTransform(tf_fw_cmd);
+
+    if (ee_cmd_valid_) {
+      geometry_msgs::msg::TransformStamped tf_ee_cmd;
+      tf_ee_cmd.header.stamp = stamp;
+      tf_ee_cmd.header.frame_id = "world";
+      tf_ee_cmd.child_frame_id = "end_effector_cmd";
+      tf_ee_cmd.transform.translation.x = ee_cmd_pos_[0];
+      tf_ee_cmd.transform.translation.y = ee_cmd_pos_[1];
+      tf_ee_cmd.transform.translation.z = ee_cmd_pos_[2];
+
+      tf2::Quaternion q_ee_cmd;
+      q_ee_cmd.setRPY(0.0, 0.0, ee_cmd_yaw_deg_ * kDegToRad);
+      tf_ee_cmd.transform.rotation.x = q_ee_cmd.x();
+      tf_ee_cmd.transform.rotation.y = q_ee_cmd.y();
+      tf_ee_cmd.transform.rotation.z = q_ee_cmd.z();
+      tf_ee_cmd.transform.rotation.w = q_ee_cmd.w();
+      tf_broadcaster_->sendTransform(tf_ee_cmd);
+    }
 
     geometry_msgs::msg::Point p0;
     p0.x = pos_[0];
@@ -760,6 +815,8 @@ private:
   };
 
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr sub_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr ee_velocity_sub_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr ee_cmd_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_history_srv_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
@@ -787,8 +844,13 @@ private:
   Eigen::Vector3d world_vel_;
   Eigen::Vector3d world_acc_;
   Eigen::Vector3d ee_vel_used_;
+  Eigen::Vector3d ee_cmd_pos_;
   std::array<double, 3> ee_offset_;
   std::string data_topic_;
+  std::string ee_velocity_topic_;
+  std::string ee_cmd_topic_;
+  double ee_cmd_yaw_deg_{0.0};
+  bool ee_cmd_valid_{false};
   double history_sample_period_{0.2};
   double history_publish_period_{0.10};
   double history_duration_{30.0};

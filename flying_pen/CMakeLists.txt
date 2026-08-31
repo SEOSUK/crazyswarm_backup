@@ -22,6 +22,7 @@ find_package(Eigen3 REQUIRED)
 find_package(ament_index_cpp REQUIRED)  # 패키지 share 경로 찾으려고
 find_package(crazyflie_interfaces REQUIRED)
 find_package(visualization_msgs REQUIRED)   # ★ 추가
+find_package(motion_capture_tracking_interfaces REQUIRED)
 # 실행파일 추가
 add_executable(data_logging src/data_logging.cpp)
 ament_target_dependencies(data_logging
@@ -39,6 +40,7 @@ ament_target_dependencies(data_logging_debug
   std_msgs
   geometry_msgs
   crazyflie_interfaces
+  motion_capture_tracking_interfaces
   tf2
   tf2_ros
 )
@@ -57,9 +59,10 @@ ament_target_dependencies(rviz_visual
   rclcpp
   std_msgs
   std_srvs
-  crazyflie_interfaces
+  geometry_msgs
   tf2_ros
-  visualization_msgs  
+  visualization_msgs
+  motion_capture_tracking_interfaces
 )
 
 add_executable(command_publisher src/command_publisher.cpp)

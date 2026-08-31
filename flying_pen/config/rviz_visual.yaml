@@ -5,3 +5,9 @@ rviz_visual:
     history_sample_period: 1.0
     history_duration: 30.0
     history_frame_axis_scale: 0.05
+    wall_pose_topic: "/poses"
+    wall_pose_name: "tilted_wall"
+    wall_marker_frame: "tilted_wall"
+    wall_scale_x: 0.01
+    wall_scale_y: 1.0
+    wall_scale_z: 0.6

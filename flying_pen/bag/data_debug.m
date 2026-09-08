@@ -186,7 +186,7 @@ mob_force_final_norm = vecnorm(mob_force_final, 2, 2);
 mob_torque_norm = vecnorm(mob_torque, 2, 2);
 mob_residual_norm = vecnorm(mob_residual, 2, 2);
 
-panelm1_acc_lpf_hz = [0.01];          % e.g. 8.0, [] or <=0 disables LPF
+panelm1_acc_lpf_hz = [0.1];          % e.g. 8.0, [] or <=0 disables LPF
 acc_raw_body_for_recon = local_lowpass_first_order(acc_raw_body, sample_hz, panelm1_acc_lpf_hz);
 
 acc_from_raw_rpy = nan(size(acc_raw_body_for_recon));
@@ -194,7 +194,7 @@ acc_from_raw_rpy(:,1) = atan2(acc_raw_body_for_recon(:,2), acc_raw_body_for_reco
 acc_from_raw_rpy(:,2) = atan2(-acc_raw_body_for_recon(:,1), sqrt(acc_raw_body_for_recon(:,2).^2 + acc_raw_body_for_recon(:,3).^2));
 acc_from_raw_rpy(:,3) = nan(size(time));
 
-panelm1_gyro_lpf_hz = [0.01];         % e.g. 8.0, [] or <=0 disables LPF
+panelm1_gyro_lpf_hz = [0.1];         % e.g. 8.0, [] or <=0 disables LPF
 gyro_body_for_recon = local_lowpass_first_order(gyro_body, sample_hz, panelm1_gyro_lpf_hz);
 gyro_integrated_rpy = local_integrate_body_rates_to_rpy_deg(gyro_body_for_recon, time, pose_rpy(1,:));
 gyro_integrated_rpy(:,3) = unwrap(gyro_integrated_rpy(:,3));
@@ -206,6 +206,8 @@ acc_normal_tilt_err = local_angle_between_unit_vectors(acc_normal_world, pose_no
 gyro_normal_tilt_err = local_angle_between_unit_vectors(gyro_normal_world, pose_normal_world);
 force_measured_x_for_control = -mob_force_final(:,1);  % normal = [-1, 0, 0] => f_n = n^T f = -fHatW_x
 force_desired_plot = force_desired;
+mob_force_final_yaw_body = local_rotate_world_to_yaw_body(mob_force_final, pose_rpy(:,3));
+force_measured_x_for_control_yaw_body = -mob_force_final_yaw_body(:,1);
 ee_offset_body = [0.1, 0.0, 0.04];
 ee_pos = local_compute_ee_position_world(pose_xyz, pose_rpy, ee_offset_body);
 normal_est_xy = normal_est_logged;
@@ -257,24 +259,132 @@ vel_color = [0.0000 0.4470 0.7410];
 acc_color = [0.2 0.6 0.2];
 pos_color = [0.4940 0.1840 0.5560];
 
-%% 5.8) Figure -0.45: force / torque / MOB estimate dashboard
-panelm045_xlim = [30 60];
-panelm045_force_ylim_all = [-0.01 0.01];
-panelm045_torque_ylim_all = [-0.001 0.001];
-panelm045_mob_force_ylim_all = [-0.12 0.12];
-panelm045_mob_torque_ylim_all = [-0.0015 0.0015];
-panelm045_force_ylim = repmat({panelm045_force_ylim_all}, 1, 3);
-panelm045_torque_ylim = repmat({panelm045_torque_ylim_all}, 1, 3);
-panelm045_mob_force_ylim = repmat({panelm045_mob_force_ylim_all}, 1, 3);
-panelm045_mob_torque_ylim = repmat({panelm045_mob_torque_ylim_all}, 1, 3);
+%% 5.1) Figure: MOB Force vs Desired
+mob_force_desired_xlim = [38 82];
+mob_force_desired_yaw_lpf_hz = 0.05;  % [] or <=0 disables phase-delay-free LPF
+mob_force_desired_x_ylim = [0 0.06];
+mob_force_desired_y_ylim = [-0.03 0.03];
+mob_force_desired_z_ylim = [-0.03 0.03];
+mob_force_desired_yaw_ylim = [];       % e.g. [-0.5 0.5], [] disables fixed ylim
+mob_force_desired_pos_x_ylim = [0 1.8];     % e.g. [0.0 1.5], [] disables fixed ylim
+mob_force_desired_pos_y_ylim = [-0.8 1.0];     % e.g. [-0.5 0.5], [] disables fixed ylim
+mob_force_desired_axis_ylims = {
+    mob_force_desired_x_ylim
+    mob_force_desired_y_ylim
+    mob_force_desired_z_ylim
+};
 
-fm045 = figure('Name', 'Force / Torque / MOB Estimate Dashboard', 'NumberTitle', 'off', ...
+f_mob_desired = figure('Name', 'MOB Force vs Desired', 'NumberTitle', 'off', 'Color', 'w');
+tiledlayout(f_mob_desired, 3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+mob_force_desired_axes = gobjects(0);
+mob_force_desired_yaw_raw = pose_rpy(:,3);
+mob_force_desired_yaw_lpf = local_lowpass_zero_phase(mob_force_desired_yaw_raw, sample_hz, mob_force_desired_yaw_lpf_hz);
+mob_force_final_desired_yaw_body = local_rotate_world_to_yaw_body(mob_force_final, mob_force_desired_yaw_lpf);
+mob_force_desired_yaw_body_plot = [-mob_force_final_desired_yaw_body(:,1), mob_force_final_desired_yaw_body(:,2), mob_force_final_desired_yaw_body(:,3)];
+mob_force_desired_legends = {
+    {'force desired', 'body -fHat_x'}
+    {'body fHat_y'}
+    {'body fHat_z'}
+};
+for i = 1:3
+    ax = nexttile(2 * i - 1);
+    mob_force_desired_axes(end+1) = ax;
+    h_force = gobjects(0);
+    if i == 1
+        h_force(end+1) = plot(ax, time, force_desired_plot, '--', 'LineWidth', 2.2, 'Color', cmd_color); hold(ax, 'on');
+    else
+        hold(ax, 'on');
+    end
+    h_force(end+1) = plot(ax, time, mob_force_desired_yaw_body_plot(:,i), '-', 'LineWidth', 2.0, 'Color', meas_color);
+    ylabel(ax, sprintf('%s [N]', axis_names{i}));
+    if ~isempty(mob_force_desired_axis_ylims{i})
+        ylim(ax, mob_force_desired_axis_ylims{i});
+    end
+    grid(ax, 'on');
+    xlabel(ax, 'time [s]');
+    title(ax, sprintf('MOB Force vs Desired %s', axis_names{i}));
+    legend(ax, h_force, mob_force_desired_legends{i}, 'Location', 'best');
+    if ~isempty(mob_force_desired_xlim)
+        xlim(ax, mob_force_desired_xlim);
+    end
+end
+
+ax_mob_desired_yaw = nexttile(2);
+mob_force_desired_axes(end+1) = ax_mob_desired_yaw;
+plot(ax_mob_desired_yaw, time, mob_force_desired_yaw_raw, ':', 'LineWidth', 1.2, 'Color', [0.45 0.45 0.45]); hold(ax_mob_desired_yaw, 'on');
+plot(ax_mob_desired_yaw, time, mob_force_desired_yaw_lpf, 'LineWidth', 2.0, 'Color', pos_color);
+grid(ax_mob_desired_yaw, 'on');
+xlabel(ax_mob_desired_yaw, 'time [s]');
+ylabel(ax_mob_desired_yaw, '\psi [rad]');
+title(ax_mob_desired_yaw, 'Yaw Angle');
+legend(ax_mob_desired_yaw, {'raw', sprintf('zero-phase LPF %.2f Hz', mob_force_desired_yaw_lpf_hz)}, 'Location', 'best');
+if ~isempty(mob_force_desired_xlim)
+    xlim(ax_mob_desired_yaw, mob_force_desired_xlim);
+end
+if ~isempty(mob_force_desired_yaw_ylim)
+    ylim(ax_mob_desired_yaw, mob_force_desired_yaw_ylim);
+end
+
+ax_mob_desired_pos_x = nexttile(4);
+mob_force_desired_axes(end+1) = ax_mob_desired_pos_x;
+h_pos_x_meas = plot(ax_mob_desired_pos_x, time, pose_xyz(:,1), '-', 'LineWidth', 2.0, 'Color', meas_color); hold(ax_mob_desired_pos_x, 'on');
+h_pos_x_des = plot(ax_mob_desired_pos_x, time, fw_cmd_xyz(:,1), '--', 'LineWidth', 2.6, 'Color', cmd_color);
+grid(ax_mob_desired_pos_x, 'on');
+xlabel(ax_mob_desired_pos_x, 'time [s]');
+ylabel(ax_mob_desired_pos_x, 'x [m]');
+title(ax_mob_desired_pos_x, 'Position X');
+legend(ax_mob_desired_pos_x, [h_pos_x_des, h_pos_x_meas], {'desired', 'measured'}, 'Location', 'best');
+if ~isempty(mob_force_desired_xlim)
+    xlim(ax_mob_desired_pos_x, mob_force_desired_xlim);
+end
+if ~isempty(mob_force_desired_pos_x_ylim)
+    ylim(ax_mob_desired_pos_x, mob_force_desired_pos_x_ylim);
+end
+
+ax_mob_desired_pos_y = nexttile(6);
+mob_force_desired_axes(end+1) = ax_mob_desired_pos_y;
+h_pos_y_meas = plot(ax_mob_desired_pos_y, time, pose_xyz(:,2), '-', 'LineWidth', 2.0, 'Color', meas_color); hold(ax_mob_desired_pos_y, 'on');
+h_pos_y_des = plot(ax_mob_desired_pos_y, time, fw_cmd_xyz(:,2), '--', 'LineWidth', 2.6, 'Color', cmd_color);
+grid(ax_mob_desired_pos_y, 'on');
+xlabel(ax_mob_desired_pos_y, 'time [s]');
+ylabel(ax_mob_desired_pos_y, 'y [m]');
+title(ax_mob_desired_pos_y, 'Position Y');
+legend(ax_mob_desired_pos_y, [h_pos_y_des, h_pos_y_meas], {'desired', 'measured'}, 'Location', 'best');
+if ~isempty(mob_force_desired_xlim)
+    xlim(ax_mob_desired_pos_y, mob_force_desired_xlim);
+end
+if ~isempty(mob_force_desired_pos_y_ylim)
+    ylim(ax_mob_desired_pos_y, mob_force_desired_pos_y_ylim);
+end
+linkaxes(mob_force_desired_axes, 'x');
+
+%% 5.8) Figure -0.45: requested 3x2 contact / MOB / normal dashboard
+panelm045_xlim = [55 152];
+panelm045_pos_ylim = {[-.0 1.6], [-0.4 0.4], [0.6 2.2]};
+panelm045_force_ylim = {[-0.02 0.08], [-0.2 0.2], [-0.1 0.1]};
+panelm045_mob_ylim = {[-0.08 0.08], [-0.08 0.08], [-0.12 0.04]};
+panelm045_normal_ylim = {[-1.7 -0.3], [-1. 1.], [-0.8 0.6]};
+panelm045_att_ylim = {[-0.1 0.1], [-0.1 0.1], [-1 1]};
+panelm045_metric_ylim = {[], [], [0.10 1.02]};
+panelm045_alpha_min = 1.0;
+panelm045_leak_bar = 0.01;
+panelm045_mob_force_none_yaw_body = local_rotate_world_to_yaw_body(mob_force_none, pose_rpy(:,3));
+panelm045_mob_force_residual_yaw_body = local_rotate_world_to_yaw_body(mob_force_residual, pose_rpy(:,3));
+panelm045_mob_force_final_yaw_body = mob_force_final_yaw_body;
+panelm045_force_measured_x_for_control = force_measured_x_for_control_yaw_body;
+
+alpha_leakage = panelm045_alpha_min + (1.0 - panelm045_alpha_min) ./ ...
+    (1.0 + (normal_velocity_leakage_logged ./ panelm045_leak_bar).^2);
+att_des_plot_m045 = att_des;
+att_des_plot_m045(:,3) = unwrap(att_des_plot_m045(:,3));
+
+fm045 = figure('Name', '3x2 Contact / MOB / Normal Dashboard', 'NumberTitle', 'off', ...
     'Color', 'w', 'Units', 'normalized', 'Position', [0.05 0.05 0.9 0.9]);
 time_axes_m045 = gobjects(0);
 
-left = 0.05; right = 0.03; top = 0.04; bottom = 0.06;
-hgap = 0.05; vgap = 0.06;
-ncol = 2; nrow = 2;
+left = 0.04; right = 0.02; top = 0.04; bottom = 0.06;
+hgap = 0.03; vgap = 0.05;
+ncol = 3; nrow = 2;
 w = (1-left-right-hgap*(ncol-1))/ncol;
 h = (1-top-bottom-vgap*(nrow-1))/nrow;
 getPos = @(row, col)[ ...
@@ -282,23 +392,23 @@ getPos = @(row, col)[ ...
     1 - top - row*h - (row-1)*vgap, ...
     w, h];
 
-% (1,1) Force input
+% (1,1) Position meas vs desired
 pm045_11 = uipanel('Parent', fm045, 'Position', getPos(1,1), 'BackgroundColor', 'w');
 tlm045_11 = tiledlayout(pm045_11, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
 for i = 1:3
     ax = nexttile(tlm045_11, i);
-    plot(ax, time, body_force(:,i), '-', 'LineWidth', 1.6, 'Color', meas_color); hold(ax, 'on');
-    plot(ax, time, world_force(:,i), '--', 'LineWidth', 1.4, 'Color', cmd_color);
+    plot(ax, time, fw_cmd_xyz(:,i), '-', 'LineWidth', 2.0, 'Color', cmd_color); hold(ax, 'on');
+    plot(ax, time, pose_xyz(:,i), '-', 'LineWidth', 1.7, 'Color', meas_color);
     grid(ax, 'on');
     xlim(ax, panelm045_xlim);
     time_axes_m045(end+1) = ax;
-    if ~isempty(panelm045_force_ylim{i})
-        ylim(ax, panelm045_force_ylim{i});
+    if ~isempty(panelm045_pos_ylim{i})
+        ylim(ax, panelm045_pos_ylim{i});
     end
-    ylabel(ax, sprintf('$F_%s$ [N]', lower(axis_names{i})), 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(ax, sprintf('$%s$ [m]', lower(axis_names{i})), 'Interpreter', 'latex', 'FontSize', 12);
     if i == 1
-        title(ax, 'Input Force');
-        legend(ax, {'body', 'world'}, 'Location', 'best');
+        title(ax, 'Position');
+        legend(ax, {'desired', 'measured'}, 'Location', 'best');
     end
     if i == 3
         xlabel(ax, 'Time [s]', 'Interpreter', 'latex', 'FontSize', 12);
@@ -307,44 +417,68 @@ for i = 1:3
     end
 end
 
-% (2,1) Torque input
+% (2,1) Force / t1 / t2 cmd vs measured
 pm045_21 = uipanel('Parent', fm045, 'Position', getPos(2,1), 'BackgroundColor', 'w');
 tlm045_21 = tiledlayout(pm045_21, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
-for i = 1:3
-    ax = nexttile(tlm045_21, i);
-    plot(ax, time, body_torque(:,i), '-', 'LineWidth', 1.6, 'Color', meas_color);
-    grid(ax, 'on');
-    xlim(ax, panelm045_xlim);
-    time_axes_m045(end+1) = ax;
-    if ~isempty(panelm045_torque_ylim{i})
-        ylim(ax, panelm045_torque_ylim{i});
-    end
-    ylabel(ax, sprintf('$\\tau_%s$ [N m]', lower(axis_names{i})), 'Interpreter', 'latex', 'FontSize', 12);
-    if i == 1
-        title(ax, 'Input Torque');
-    end
-    if i == 3
-        xlabel(ax, 'Time [s]', 'Interpreter', 'latex', 'FontSize', 12);
-    else
-        set(ax, 'XTickLabel', []);
-    end
-end
 
-% (1,2) Force MOB estimate
+axm045_force = nexttile(tlm045_21, 1);
+plot(axm045_force, time, force_desired_plot, '-', 'LineWidth', 2.0, 'Color', cmd_color); hold(axm045_force, 'on');
+plot(axm045_force, time, force_measured_x_for_control, ':', 'LineWidth', 1.3, 'Color', [0.45 0.45 0.45]);
+plot(axm045_force, time, panelm045_force_measured_x_for_control, '-', 'LineWidth', 1.7, 'Color', meas_color);
+grid(axm045_force, 'on');
+xlim(axm045_force, panelm045_xlim);
+time_axes_m045(end+1) = axm045_force;
+if ~isempty(panelm045_force_ylim{1})
+    ylim(axm045_force, panelm045_force_ylim{1});
+end
+ylabel(axm045_force, '$f_n$ [N]', 'Interpreter', 'latex', 'FontSize', 12);
+title(axm045_force, 'Force / Tangential Command');
+legend(axm045_force, {'cmd', 'measured world', 'measured yaw-body'}, 'Location', 'best');
+set(axm045_force, 'XTickLabel', []);
+
+axm045_t1 = nexttile(tlm045_21, 2);
+plot(axm045_t1, time, contact_t1_cmd, '-', 'LineWidth', 2.0, 'Color', cmd_color); hold(axm045_t1, 'on');
+plot(axm045_t1, time, contact_t1_meas, '-', 'LineWidth', 1.7, 'Color', meas_color);
+grid(axm045_t1, 'on');
+xlim(axm045_t1, panelm045_xlim);
+time_axes_m045(end+1) = axm045_t1;
+if ~isempty(panelm045_force_ylim{2})
+    ylim(axm045_t1, panelm045_force_ylim{2});
+end
+ylabel(axm045_t1, '$t_1$ [m/s]', 'Interpreter', 'latex', 'FontSize', 12);
+set(axm045_t1, 'XTickLabel', []);
+
+axm045_t2 = nexttile(tlm045_21, 3);
+plot(axm045_t2, time, contact_t2_cmd, '-', 'LineWidth', 2.0, 'Color', cmd_color); hold(axm045_t2, 'on');
+plot(axm045_t2, time, contact_t2_meas, '-', 'LineWidth', 1.7, 'Color', meas_color);
+grid(axm045_t2, 'on');
+xlim(axm045_t2, panelm045_xlim);
+time_axes_m045(end+1) = axm045_t2;
+if ~isempty(panelm045_force_ylim{3})
+    ylim(axm045_t2, panelm045_force_ylim{3});
+end
+xlabel(axm045_t2, 'Time [s]', 'Interpreter', 'latex', 'FontSize', 12);
+ylabel(axm045_t2, '$t_2$ [m/s]', 'Interpreter', 'latex', 'FontSize', 12);
+
+% (1,2) Momentum observer pure vs consistency
 pm045_12 = uipanel('Parent', fm045, 'Position', getPos(1,2), 'BackgroundColor', 'w');
 tlm045_12 = tiledlayout(pm045_12, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
 for i = 1:3
     ax = nexttile(tlm045_12, i);
-    plot(ax, time, mob_force_none(:,i), '-', 'LineWidth', 2.0, 'Color', meas_color);
+    plot(ax, time, mob_force_none(:,i), ':', 'LineWidth', 1.1, 'Color', [0.55 0.35 0.25]); hold(ax, 'on');
+    plot(ax, time, panelm045_mob_force_none_yaw_body(:,i), '-', 'LineWidth', 1.8, 'Color', meas_color);
+    plot(ax, time, mob_force_residual(:,i), ':', 'LineWidth', 1.1, 'Color', [0.35 0.45 0.60]);
+    plot(ax, time, panelm045_mob_force_residual_yaw_body(:,i), '-', 'LineWidth', 1.7, 'Color', cmd_color);
     grid(ax, 'on');
     xlim(ax, panelm045_xlim);
     time_axes_m045(end+1) = ax;
-    if ~isempty(panelm045_mob_force_ylim{i})
-        ylim(ax, panelm045_mob_force_ylim{i});
+    if ~isempty(panelm045_mob_ylim{i})
+        ylim(ax, panelm045_mob_ylim{i});
     end
     ylabel(ax, sprintf('$f_{%s}$ [N]', lower(axis_names{i})), 'Interpreter', 'latex', 'FontSize', 12);
     if i == 1
-        title(ax, 'Force MOB Estimate');
+        title(ax, 'Momentum Observer (world vs yaw body)');
+        legend(ax, {'pure world', 'pure yaw-body', 'consistency world', 'consistency yaw-body'}, 'Location', 'best');
     end
     if i == 3
         xlabel(ax, 'Time [s]', 'Interpreter', 'latex', 'FontSize', 12);
@@ -353,21 +487,23 @@ for i = 1:3
     end
 end
 
-% (2,2) Torque MOB estimate
+% (2,2) Normal estimation: final vs pre-projection
 pm045_22 = uipanel('Parent', fm045, 'Position', getPos(2,2), 'BackgroundColor', 'w');
 tlm045_22 = tiledlayout(pm045_22, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
 for i = 1:3
     ax = nexttile(tlm045_22, i);
-    plot(ax, time, mob_torque(:,i), '-', 'LineWidth', 2.0, 'Color', meas_color);
+    plot(ax, time, normal_pre_logged(:,i), '-', 'LineWidth', 2.0, 'Color', cmd_color); hold(ax, 'on');
+    plot(ax, time, normal_est_logged(:,i), '-', 'LineWidth', 1.7, 'Color', meas_color);
     grid(ax, 'on');
     xlim(ax, panelm045_xlim);
     time_axes_m045(end+1) = ax;
-    if ~isempty(panelm045_mob_torque_ylim{i})
-        ylim(ax, panelm045_mob_torque_ylim{i});
+    if ~isempty(panelm045_normal_ylim{i})
+        ylim(ax, panelm045_normal_ylim{i});
     end
-    ylabel(ax, sprintf('$\\tau_%s$ [N m]', lower(axis_names{i})), 'Interpreter', 'latex', 'FontSize', 12);
+    ylabel(ax, sprintf('$n_%s$ [-]', lower(axis_names{i})), 'Interpreter', 'latex', 'FontSize', 12);
     if i == 1
-        title(ax, 'Torque MOB Estimate');
+        title(ax, 'Normal Estimation');
+        legend(ax, {'pre-projection', 'final'}, 'Location', 'best');
     end
     if i == 3
         xlabel(ax, 'Time [s]', 'Interpreter', 'latex', 'FontSize', 12);
@@ -376,11 +512,105 @@ for i = 1:3
     end
 end
 
+% (1,3) EE trajectory only
+pm045_13 = uipanel('Parent', fm045, 'Position', getPos(1,3), 'BackgroundColor', 'w');
+tlm045_13 = tiledlayout(pm045_13, 1, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+axm045_xz = nexttile(tlm045_13, 1);
+local_plot_ee_normal_xz(axm045_xz, time, ee_pos, normal_est_logged, panelm045_xlim);
+
+% (2,3) Attitude desired vs measured
+pm045_23 = uipanel('Parent', fm045, 'Position', getPos(2,3), 'BackgroundColor', 'w');
+tlm045_23 = tiledlayout(pm045_23, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+axm045_att_roll = nexttile(tlm045_23, 1);
+plot(axm045_att_roll, time, att_des_plot_m045(:,1), '-', 'LineWidth', 2.0, 'Color', cmd_color); hold(axm045_att_roll, 'on');
+plot(axm045_att_roll, time, pose_rpy(:,1), '-', 'LineWidth', 1.7, 'Color', meas_color);
+grid(axm045_att_roll, 'on');
+xlim(axm045_att_roll, panelm045_xlim);
+time_axes_m045(end+1) = axm045_att_roll;
+if ~isempty(panelm045_att_ylim{1})
+    ylim(axm045_att_roll, panelm045_att_ylim{1});
+end
+ylabel(axm045_att_roll, '$\phi$ [rad]', 'Interpreter', 'latex', 'FontSize', 12);
+title(axm045_att_roll, 'Attitude');
+legend(axm045_att_roll, {'desired', 'measured'}, 'Location', 'best');
+set(axm045_att_roll, 'XTickLabel', []);
+
+axm045_att_pitch = nexttile(tlm045_23, 2);
+plot(axm045_att_pitch, time, att_des_plot_m045(:,2), '-', 'LineWidth', 2.0, 'Color', cmd_color); hold(axm045_att_pitch, 'on');
+plot(axm045_att_pitch, time, pose_rpy(:,2), '-', 'LineWidth', 1.7, 'Color', meas_color);
+grid(axm045_att_pitch, 'on');
+xlim(axm045_att_pitch, panelm045_xlim);
+time_axes_m045(end+1) = axm045_att_pitch;
+if ~isempty(panelm045_att_ylim{2})
+    ylim(axm045_att_pitch, panelm045_att_ylim{2});
+end
+ylabel(axm045_att_pitch, '$\theta$ [rad]', 'Interpreter', 'latex', 'FontSize', 12);
+set(axm045_att_pitch, 'XTickLabel', []);
+
+axm045_att_yaw = nexttile(tlm045_23, 3);
+plot(axm045_att_yaw, time, att_des_plot_m045(:,3), '-', 'LineWidth', 2.0, 'Color', cmd_color); hold(axm045_att_yaw, 'on');
+plot(axm045_att_yaw, time, pose_rpy(:,3), '-', 'LineWidth', 1.7, 'Color', meas_color);
+grid(axm045_att_yaw, 'on');
+xlim(axm045_att_yaw, panelm045_xlim);
+time_axes_m045(end+1) = axm045_att_yaw;
+if ~isempty(panelm045_att_ylim{3})
+    ylim(axm045_att_yaw, panelm045_att_ylim{3});
+end
+xlabel(axm045_att_yaw, 'Time [s]', 'Interpreter', 'latex', 'FontSize', 12);
+ylabel(axm045_att_yaw, '$\psi$ [rad]', 'Interpreter', 'latex', 'FontSize', 12);
+
+% Separate normal metrics window
+fm045_metrics = figure('Name', 'Normal Metrics', 'NumberTitle', 'off', ...
+    'Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.08 0.32 0.62]);
+tlm045_metrics = tiledlayout(fm045_metrics, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+axm045_omega = nexttile(tlm045_metrics, 1);
+plot(axm045_omega, time, omega_n_logged, '-', 'LineWidth', 1.8, 'Color', acc_color);
+grid(axm045_omega, 'on');
+xlim(axm045_omega, panelm045_xlim);
+time_axes_m045(end+1) = axm045_omega;
+if ~isempty(panelm045_metric_ylim{1})
+    ylim(axm045_omega, panelm045_metric_ylim{1});
+end
+ylabel(axm045_omega, '$\omega_n$ [1/s]', 'Interpreter', 'latex', 'FontSize', 12);
+title(axm045_omega, 'Normal Metrics');
+set(axm045_omega, 'XTickLabel', []);
+
+axm045_leak = nexttile(tlm045_metrics, 2);
+plot(axm045_leak, time, normal_velocity_leakage_logged, '-', 'LineWidth', 1.8, 'Color', pos_color);
+grid(axm045_leak, 'on');
+xlim(axm045_leak, panelm045_xlim);
+time_axes_m045(end+1) = axm045_leak;
+if ~isempty(panelm045_metric_ylim{2})
+    ylim(axm045_leak, panelm045_metric_ylim{2});
+end
+ylabel(axm045_leak, '$v_{\mathrm{leak}}$ [-]', 'Interpreter', 'latex', 'FontSize', 12);
+set(axm045_leak, 'XTickLabel', []);
+
+axm045_alpha = nexttile(tlm045_metrics, 3);
+plot(axm045_alpha, time, alpha_leakage, '-', 'LineWidth', 1.8, 'Color', meas_color);
+grid(axm045_alpha, 'on');
+xlim(axm045_alpha, panelm045_xlim);
+time_axes_m045(end+1) = axm045_alpha;
+if ~isempty(panelm045_metric_ylim{3})
+    ylim(axm045_alpha, panelm045_metric_ylim{3});
+end
+xlabel(axm045_alpha, 'Time [s]', 'Interpreter', 'latex', 'FontSize', 12);
+ylabel(axm045_alpha, '$\alpha_{\mathrm{leak}}$ [-]', 'Interpreter', 'latex', 'FontSize', 12);
+
 linkaxes(time_axes_m045, 'x');
+setappdata(fm045, 'panelm045_time', time);
+setappdata(fm045, 'panelm045_ee_pos', ee_pos);
+setappdata(fm045, 'panelm045_normal_est', normal_est_logged);
+setappdata(fm045, 'panelm045_normal_pre', normal_pre_logged);
+setappdata(fm045, 'panelm045_xz_ax', axm045_xz);
+setappdata(fm045, 'panelm045_sync_listener', addlistener(time_axes_m045(1), 'XLim', 'PostSet', ...
+    @(~, evt)local_sync_panelm045_xz(evt.AffectedObject, fm045)));
 set(findall(fm045, 'Type', 'axes'), 'FontSize', 9, 'Color', 'w');
 
 %% 5.7) Figure 0: contact-frame overview / normal + EE top view / MOB pure vs consistency
-panel0_xlim = [165 202];
+panel0_xlim = [40 103];
 panel0_force_ylim = [-0.02 0.12];
 panel0_t1_ylim = [-0.35 0.35];
 panel0_t2_ylim = [-0.35 0.35];
@@ -481,135 +711,6 @@ grid(ax0_timer_hist, 'on');
 xlabel(ax0_timer_hist, 'loopDtUs [us]');
 ylabel(ax0_timer_hist, 'count');
 title(ax0_timer_hist, 'Stabilizer loop elapsed-time histogram');
-
-
-%% 5.7.1) Figure 0.1: position / attitude / MOB command overview
-panel01_xlim = ([130 220]);
-panel01_pos_ylim = {[0.5 2], [-0.75 0.75], [0.75 2.25]};
-panel01_att_ylim = {[-0.15 0.15], [0 0.3], [-0.15 0.15]};
-panel01_force_ylim = {[0 0.15], [-0.075 0.075], [-0.075 0.075]};
-panel01_torque_ylim = {[], [], []};
-att_des_plot_01 = att_des;
-att_des_plot_01(:,3) = unwrap(att_des_plot_01(:,3));
-pose_rpy_plot_01 = pose_rpy;
-pose_rpy_plot_01(:,3) = unwrap(pose_rpy_plot_01(:,3));
-force_mob_plot_01 = -mob_force_none;
-
-f01 = figure('Name', 'Position / Attitude / MOB Command Overview', 'NumberTitle', 'off', ...
-    'Color', 'w', 'Units', 'normalized', 'Position', [0.06 0.07 0.88 0.82]);
-time_axes_01 = gobjects(0);
-
-left01 = 0.05; right01 = 0.03; top01 = 0.04; bottom01 = 0.06;
-hgap01 = 0.05; vgap01 = 0.06;
-w01 = (1-left01-right01-hgap01)/2;
-h01 = (1-top01-bottom01-vgap01)/2;
-getPos01 = @(row, col)[ ...
-    left01 + (col-1)*(w01+hgap01), ...
-    1 - top01 - row*h01 - (row-1)*vgap01, ...
-    w01, h01];
-
-% (1,1) Position xyz: command vs measured
-p01_pos = uipanel('Parent', f01, 'Position', getPos01(1,1), 'BackgroundColor', 'w');
-tl01_pos = tiledlayout(p01_pos, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
-for i = 1:3
-    ax = nexttile(tl01_pos, i);
-    plot(ax, time, fw_cmd_xyz(:,i), '--', 'LineWidth', 1.4, 'Color', cmd_color); hold(ax, 'on');
-    plot(ax, time, pose_xyz(:,i), '-', 'LineWidth', 1.4, 'Color', meas_color);
-    grid(ax, 'on');
-    xlim(ax, panel01_xlim);
-    time_axes_01(end+1) = ax;
-    if ~isempty(panel01_pos_ylim{i})
-        ylim(ax, panel01_pos_ylim{i});
-    end
-    ylabel(ax, sprintf('%s [m]', axis_names{i}));
-    if i == 1
-        title(ax, 'Position');
-        legend(ax, {'cmd', 'meas'}, 'Location', 'best');
-    end
-    if i == 3
-        xlabel(ax, 'time [s]');
-    else
-        set(ax, 'XTickLabel', []);
-    end
-end
-
-% (2,1) Attitude xyz: command vs measured
-p01_att = uipanel('Parent', f01, 'Position', getPos01(2,1), 'BackgroundColor', 'w');
-tl01_att = tiledlayout(p01_att, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
-for i = 1:3
-    ax = nexttile(tl01_att, i);
-    plot(ax, time, att_des_plot_01(:,i), '--', 'LineWidth', 1.4, 'Color', cmd_color); hold(ax, 'on');
-    plot(ax, time, pose_rpy_plot_01(:,i), '-', 'LineWidth', 1.4, 'Color', meas_color);
-    grid(ax, 'on');
-    xlim(ax, panel01_xlim);
-    time_axes_01(end+1) = ax;
-    if ~isempty(panel01_att_ylim{i})
-        ylim(ax, panel01_att_ylim{i});
-    end
-    ylabel(ax, sprintf('%s [rad]', axis_names{i}));
-    if i == 1
-        title(ax, 'Attitude');
-        legend(ax, {'cmd', 'meas'}, 'Location', 'best');
-    end
-    if i == 3
-        xlabel(ax, 'time [s]');
-    else
-        set(ax, 'XTickLabel', []);
-    end
-end
-
-% (1,2) Force MOB estimate vs desired. Desired command exists only on X.
-p01_force = uipanel('Parent', f01, 'Position', getPos01(1,2), 'BackgroundColor', 'w');
-tl01_force = tiledlayout(p01_force, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
-for i = 1:3
-    ax = nexttile(tl01_force, i);
-    plot(ax, time, force_mob_plot_01(:,i), '-', 'LineWidth', 1.4, 'Color', meas_color); hold(ax, 'on');
-    if i == 1
-        plot(ax, time, force_desired_plot, '--', 'LineWidth', 1.4, 'Color', cmd_color);
-    end
-    grid(ax, 'on');
-    xlim(ax, panel01_xlim);
-    time_axes_01(end+1) = ax;
-    if ~isempty(panel01_force_ylim{i})
-        ylim(ax, panel01_force_ylim{i});
-    end
-    ylabel(ax, sprintf('%s [N]', axis_names{i}));
-    if i == 1
-        title(ax, 'Force MOB vs Desired');
-        legend(ax, {'-MOB', 'desired'}, 'Location', 'best');
-    end
-    if i == 3
-        xlabel(ax, 'time [s]');
-    else
-        set(ax, 'XTickLabel', []);
-    end
-end
-
-% (2,2) Torque MOB estimate
-p01_torque = uipanel('Parent', f01, 'Position', getPos01(2,2), 'BackgroundColor', 'w');
-tl01_torque = tiledlayout(p01_torque, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
-for i = 1:3
-    ax = nexttile(tl01_torque, i);
-    plot(ax, time, mob_torque(:,i), '-', 'LineWidth', 1.4, 'Color', meas_color);
-    grid(ax, 'on');
-    xlim(ax, panel01_xlim);
-    time_axes_01(end+1) = ax;
-    if ~isempty(panel01_torque_ylim{i})
-        ylim(ax, panel01_torque_ylim{i});
-    end
-    ylabel(ax, sprintf('%s [N m]', axis_names{i}));
-    if i == 1
-        title(ax, 'Torque MOB');
-    end
-    if i == 3
-        xlabel(ax, 'time [s]');
-    else
-        set(ax, 'XTickLabel', []);
-    end
-end
-
-linkaxes(time_axes_01, 'x');
-set(findall(f01, 'Type', 'axes'), 'FontSize', 9, 'Color', 'w');
 
 
 %% 5.6.1) Figure -0.4: normal metrics + position
@@ -834,7 +935,7 @@ elseif ~isempty(summary_xlim)
 end
 
 %% 5.5) Figure -1: accel/gyro inputs and offline attitude reconstruction
-panelm1_xlim = [0 140];                % e.g. [0 10]
+panelm1_xlim = [25 190];                % e.g. [0 10]
 panelm1_acc_ylim = [];            % fallback for all raw-acc subplots
 panelm1_gyro_ylim = [];           % fallback for all raw-gyro subplots
 panelm1_rpy_ylim = [];            % fallback for all attitude subplots
@@ -994,8 +1095,8 @@ f05 = figure('Name', 'Debug Pose / Command Position / Attitude Compare', 'Number
 tiledlayout(f05, 3, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 for i = 1:3
     nexttile(3 * (i - 1) + 1);
-    plot(time, pose_xyz(:,i), 'LineWidth', 1.2, 'Color', meas_color); hold on;
-    plot(time, fw_cmd_xyz(:,i), '--', 'LineWidth', 1.2, 'Color', cmd_color);
+    plot(time, pose_xyz(:,i), 'LineWidth', 1.8, 'Color', meas_color); hold on;
+    plot(time, fw_cmd_xyz(:,i), '--', 'LineWidth', 1.8, 'Color', cmd_color);
     grid on;
     xlabel('time [s]');
     ylabel(sprintf('%s [m]', axis_names{i}));
@@ -1013,8 +1114,8 @@ for i = 1:3
     end
 
     nexttile(3 * (i - 1) + 2);
-    plot(time, state_vel(:,i), 'LineWidth', 1.2, 'Color', meas_color); hold on;
-    plot(time, vel_des(:,i), '--', 'LineWidth', 1.2, 'Color', cmd_color);
+    plot(time, state_vel(:,i), 'LineWidth', 1.8, 'Color', meas_color); hold on;
+    plot(time, vel_des(:,i), '--', 'LineWidth', 1.8, 'Color', cmd_color);
     grid on;
     xlabel('time [s]');
     ylabel(sprintf('%s [m/s]', axis_names{i}));
@@ -1032,10 +1133,10 @@ for i = 1:3
     end
 
     nexttile(3 * (i - 1) + 3);
-    plot(time, pose_rpy(:,i), 'LineWidth', 1.2, 'Color', meas_color); hold on;
-    plot(time, att_des_plot(:,i), '--', 'LineWidth', 1.2, 'Color', cmd_color);
+    plot(time, pose_rpy(:,i), 'LineWidth', 1.8, 'Color', meas_color); hold on;
+    plot(time, att_des_plot(:,i), '--', 'LineWidth', 1.8, 'Color', cmd_color);
     if i == 3 && any(isfinite(yaw_ref_plot))
-        plot(time, yaw_ref_plot, '-', 'LineWidth', 1.1, 'Color', pos_color);
+        plot(time, yaw_ref_plot, '-', 'LineWidth', 1.8, 'Color', pos_color);
         legend({'measured', 'att\_des', 'yawRef'}, 'Location', 'best');
     else
         legend({'measured', 'command'}, 'Location', 'best');
@@ -1057,12 +1158,12 @@ for i = 1:3
 end
 
 %% 7) Figure 1: MOB force compare / torque panel
-panel1_xlim = [30 60];                % e.g. [0 10]
+panel1_xlim = [38 82];                % e.g. [0 10]
 panel1_force_ylim = [-0.05 0.05];          % fallback for all MOB force subplots
 panel1_torque_ylim = [-0.05 0.05];         % fallback for all MOB torque subplots
 panel1_force_x_ylim = [-0.05 0.05];
 panel1_force_y_ylim = [-0.05 0.05];
-panel1_force_z_ylim = [-0.05 0.05];
+panel1_force_z_ylim = [-0.08 0.02];
 panel1_torque_x_ylim = [-0.003 0.003];
 panel1_torque_y_ylim = [-0.003 0.003];
 panel1_torque_z_ylim = [-0.003 0.003];
@@ -1074,8 +1175,8 @@ f1 = figure('Name', 'Debug MOB Force / Torque Compare', 'NumberTitle', 'off', 'C
 tiledlayout(f1, 3, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 for i = 1:3
     nexttile(2 * i - 1);
-    plot(time, mob_force_none(:,i), 'LineWidth', 1.2, 'Color', meas_color); hold on;
-    plot(time, mob_force_residual(:,i), '--', 'LineWidth', 1.2, 'Color', cmd_color);
+    plot(time, mob_force_none(:,i), 'LineWidth', 1.8, 'Color', meas_color); hold on;
+    plot(time, mob_force_residual(:,i), '--', 'LineWidth', 1.8, 'Color', cmd_color);
     grid on;
     xlabel('time [s]');
     ylabel(sprintf('%s [N]', axis_names{i}));
@@ -1093,7 +1194,7 @@ for i = 1:3
     end
 
     nexttile(2 * i);
-    plot(time, mob_torque(:,i), 'LineWidth', 1.2, 'Color', [0.2 0.6 0.2]);
+    plot(time, mob_torque(:,i), 'LineWidth', 1.8, 'Color', [0.2 0.6 0.2]);
     grid on;
     xlabel('time [s]');
     ylabel(sprintf('%s [N*m]', axis_names{i}));
@@ -1366,6 +1467,17 @@ function y = local_lowpass_first_order(x, sample_hz, cutoff_hz)
             end
         end
     end
+end
+
+function y = local_lowpass_zero_phase(x, sample_hz, cutoff_hz)
+    y = x;
+    if isempty(cutoff_hz) || ~isfinite(cutoff_hz) || cutoff_hz <= 0 || sample_hz <= 0
+        return;
+    end
+
+    y_forward = local_lowpass_first_order(x, sample_hz, cutoff_hz);
+    y_reverse = flipud(local_lowpass_first_order(flipud(y_forward), sample_hz, cutoff_hz));
+    y = y_reverse;
 end
 
 function normal_world = local_rpy_to_world_normal(rpy)
@@ -1934,4 +2046,21 @@ function proj = local_project_rows(v_rows, axis_rows)
     proj = nan(size(v_rows, 1), 1);
     valid = all(isfinite(v_rows), 2) & all(isfinite(axis_rows), 2);
     proj(valid) = sum(v_rows(valid,:) .* axis_rows(valid,:), 2);
+end
+
+function f_yaw_body = local_rotate_world_to_yaw_body(f_world, yaw)
+    f_yaw_body = nan(size(f_world));
+    if size(f_world, 2) ~= 3
+        return;
+    end
+    valid = isfinite(yaw) & all(isfinite(f_world), 2);
+    if ~any(valid)
+        return;
+    end
+
+    cy = cos(yaw(valid));
+    sy = sin(yaw(valid));
+    f_yaw_body(valid,1) = cy .* f_world(valid,1) + sy .* f_world(valid,2);
+    f_yaw_body(valid,2) = -sy .* f_world(valid,1) + cy .* f_world(valid,2);
+    f_yaw_body(valid,3) = f_world(valid,3);
 end

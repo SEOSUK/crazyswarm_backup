@@ -9,9 +9,11 @@ project(crazyflie)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(crazyflie_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -64,10 +66,13 @@ endif()
 
 ament_target_dependencies(crazyflie_server
   rclcpp
+  ament_index_cpp
   tf2_ros
+  std_msgs
   sensor_msgs
   std_srvs
   crazyflie_interfaces
+  geometry_msgs
   motion_capture_tracking_interfaces
   ament_index_cpp
 )

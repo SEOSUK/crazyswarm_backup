@@ -47,14 +47,12 @@ robot_types:
         cf_su_normal_debug:
           frequency: 20
           vars: [suPosRef.nPreX, suPosRef.nPreY, suPosRef.nPreZ, suPosRef.nPostX, suPosRef.nPostY, suPosRef.nPostZ]
-        # End-effector velocity from su_position_reference.c.
-        cf_su_normal_metrics:
-          frequency: 20
-          vars: [suPosRef.vEeX, suPosRef.vEeY, suPosRef.vEeZ, suPosRef.nVelLeak]
-        # Final end-effector command computed inside firmware.
-        cf_su_ee_cmd:
-          frequency: 20
-          vars: [suPosRef.eeCmdX, suPosRef.eeCmdY, suPosRef.eeCmdZ, suPosRef.eeCmdYaw]
+        # cf_su_normal_metrics:
+        #   frequency: 20
+        #   vars: [suPosRef.vEeX, suPosRef.vEeY, suPosRef.vEeZ, suPosRef.omgN, suPosRef.nVelLeak]
+        # cf_su_alpha_frame:
+        #   frequency: 20
+        #   vars: [suPosRef.alphaFrm, suPosRef.t1CmdDes, suPosRef.t2CmdDes]
         vel_att_des:
           frequency: 10
           vars: [posCtl.targetVX, posCtl.targetVY, posCtl.targetVZ, controller.roll, controller.pitch, controller.yaw]
@@ -117,9 +115,9 @@ robot_types:
       # - Position/velocity filters default ON. Attitude/rate filters default OFF on cf21bl.
       # - Feedforward term is added as outFF = kff * desired.
       posCtlPid:
-        xKp: 1.0 # Default: 2.0
-        yKp: 1.0 # Default: 2.0
-        zKp: 2.0 # Default: 2.0
+        xKp: 1.3 # Default: 2.0
+        yKp: 1.3 # Default: 2.0
+        zKp: 2.2 # Default: 2.0
         xKi: 0.0 # Default: 0.0
         yKi: 0.0 # Default: 0.0
         zKi: 0.0 # Default: 0.5
@@ -136,9 +134,9 @@ robot_types:
       velCtlPid:
         vxKp: 15.0 # Default: 25.0
         vyKp: 15.0 # Default: 25.0
-        vzKp: 15.0 # Default: 25.0
-        vxKi: 0.0 # Default: 1.0
-        vyKi: 0.0 # Default: 1.0
+        vzKp: 20.0 # Default: 25.0
+        vxKi: 0. # Default: 1.0
+        vyKi: 0. # Default: 1.0
         vzKi: 7.0 # Default: 15.0
         vxKd: 1.2 # Default: 0.0
         vyKd: 1.2 # Default: 0.0

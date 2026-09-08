@@ -144,6 +144,7 @@ class SuInterface(Node):
             return
 
         self.current_mass, self.current_com_off_x, self.current_com_off_y = self._load_current_hover_calibration()
+        current_mass = self.current_mass
         current_com_off_x = self.current_com_off_x
         current_com_off_y = self.current_com_off_y
 
@@ -186,18 +187,19 @@ class SuInterface(Node):
         self.send_hover_calibration_trigger(calibration, log_request=True)
         self.get_logger().info(
             'HOVER CALIBRATION local result: samples=%d, thrust=%.4f N, tau_input=(%.5f, %.5f) N*m, '
+            'current mass=%.4f kg, new mass=%.4f kg, '
             'current comOffXY=(%.5f, %.5f) m, delta comOffXY=(%.5f, %.5f) m, '
-            'measured mass=%.4f kg, mass=%.4f kg, new comOffXY=(%.5f, %.5f) m',
+            'new comOffXY=(%.5f, %.5f) m',
             calibration['sample_count'],
             calibration['hover_thrust'],
             calibration['tau_x'],
             calibration['tau_y'],
+            current_mass,
+            calibration['mass'],
             current_com_off_x,
             current_com_off_y,
             calibration['delta_com_x'],
             calibration['delta_com_y'],
-            measured_mass,
-            calibration['mass'],
             calibration['com_off_x'],
             calibration['com_off_y'],
         )

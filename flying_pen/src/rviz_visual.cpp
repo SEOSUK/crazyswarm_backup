@@ -1,10 +1,11 @@
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 #include "std_srvs/srv/trigger.hpp"
-#include "crazyflie_interfaces/msg/log_data_generic.hpp"
+#include "geometry_msgs/msg/pose.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
+#include "motion_capture_tracking_interfaces/msg/named_pose_array.hpp"
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -45,12 +46,16 @@ public:
     tf_broadcaster_(std::make_shared<tf2_ros::TransformBroadcaster>(this))
   {
     data_topic_ = this->declare_parameter<std::string>("topic", "/data_logging_msg_debug");
-    ee_velocity_topic_ = this->declare_parameter<std::string>("ee_velocity_topic", "cf2/cf_su_ee_velocity");
-    ee_cmd_topic_ = this->declare_parameter<std::string>("ee_cmd_topic", "cf2/cf_su_ee_cmd");
     history_sample_period_ = this->declare_parameter<double>("history_sample_period", 0.2);
     history_publish_period_ = this->declare_parameter<double>("history_publish_period", 0.10);
     history_duration_ = this->declare_parameter<double>("history_duration", 30.0);
     history_frame_axis_scale_ = this->declare_parameter<double>("history_frame_axis_scale", 0.3);
+    wall_pose_topic_ = this->declare_parameter<std::string>("wall_pose_topic", "/poses");
+    wall_pose_name_ = this->declare_parameter<std::string>("wall_pose_name", "tilted_wall");
+    wall_marker_frame_ = this->declare_parameter<std::string>("wall_marker_frame", "tilted_wall");
+    wall_scale_x_ = this->declare_parameter<double>("wall_scale_x", 0.01);
+    wall_scale_y_ = this->declare_parameter<double>("wall_scale_y", 1.0);
+    wall_scale_z_ = this->declare_parameter<double>("wall_scale_z", 0.6);
     ee_offset_ = declareOffsetParameter();
 
     auto qos = rclcpp::QoS(
@@ -59,10 +64,8 @@ public:
 
     sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
       data_topic_, qos, std::bind(&RvizVisual::dataCallback, this, std::placeholders::_1));
-    ee_velocity_sub_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      ee_velocity_topic_, 10, std::bind(&RvizVisual::eeVelocityCallback, this, std::placeholders::_1));
-    ee_cmd_sub_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
-      ee_cmd_topic_, 10, std::bind(&RvizVisual::eeCmdCallback, this, std::placeholders::_1));
+    wall_pose_sub_ = this->create_subscription<motion_capture_tracking_interfaces::msg::NamedPoseArray>(
+      wall_pose_topic_, qos, std::bind(&RvizVisual::wallPoseCallback, this, std::placeholders::_1));
 
     clear_history_srv_ = this->create_service<std_srvs::srv::Trigger>(
       "~/clear_history",
@@ -97,17 +100,34 @@ public:
     world_vel_.setZero();
     world_acc_.setZero();
     ee_vel_used_.setZero();
-    ee_cmd_pos_.setZero();
 
-    RCLCPP_INFO(
-      get_logger(),
-      "rviz_visual started. subscribing %s, %s and %s",
-      data_topic_.c_str(),
-      ee_velocity_topic_.c_str(),
-      ee_cmd_topic_.c_str());
+    RCLCPP_INFO(get_logger(), "rviz_visual started. subscribing %s", data_topic_.c_str());
   }
 
 private:
+  void wallPoseCallback(
+    const motion_capture_tracking_interfaces::msg::NamedPoseArray::SharedPtr msg)
+  {
+    for (const auto & named_pose : msg->poses) {
+      if (named_pose.name != wall_pose_name_) {
+        continue;
+      }
+
+      const auto & p = named_pose.pose.position;
+      const auto & q = named_pose.pose.orientation;
+      if (
+        !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
+        !std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z) || !std::isfinite(q.w))
+      {
+        return;
+      }
+
+      wall_pose_ = named_pose.pose;
+      wall_pose_valid_ = true;
+      return;
+    }
+  }
+
   void dataCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
   {
     if (msg->data.size() < 82) {
@@ -158,31 +178,22 @@ private:
     ee_vel_used_[1] = msg->data[80];
     ee_vel_used_[2] = msg->data[81];
 
+    if (msg->data.size() >= 96) {
+      geometry_msgs::msg::Pose wall_pose_from_log;
+      wall_pose_from_log.position.x = msg->data[89];
+      wall_pose_from_log.position.y = msg->data[90];
+      wall_pose_from_log.position.z = msg->data[91];
+      wall_pose_from_log.orientation.x = msg->data[92];
+      wall_pose_from_log.orientation.y = msg->data[93];
+      wall_pose_from_log.orientation.z = msg->data[94];
+      wall_pose_from_log.orientation.w = msg->data[95];
+      if (isFinitePose(wall_pose_from_log)) {
+        wall_pose_ = wall_pose_from_log;
+        wall_pose_valid_ = true;
+      }
+    }
+
     pose_valid_ = isFiniteVector(pos_) && isFiniteVector(rpy_meas_);
-  }
-
-  void eeVelocityCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
-  {
-    if (!msg || msg->values.size() < 3) {
-      return;
-    }
-
-    ee_vel_used_[0] = msg->values[0];
-    ee_vel_used_[1] = msg->values[1];
-    ee_vel_used_[2] = msg->values[2];
-  }
-
-  void eeCmdCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
-  {
-    if (!msg || msg->values.size() < 4) {
-      return;
-    }
-
-    ee_cmd_pos_[0] = msg->values[0];
-    ee_cmd_pos_[1] = msg->values[1];
-    ee_cmd_pos_[2] = msg->values[2];
-    ee_cmd_yaw_deg_ = msg->values[3];
-    ee_cmd_valid_ = isFiniteVector(ee_cmd_pos_) && std::isfinite(ee_cmd_yaw_deg_);
   }
 
   void publishTfTimer()
@@ -259,24 +270,6 @@ private:
     tf_fw_cmd.transform.rotation = tf_cmd.transform.rotation;
     tf_broadcaster_->sendTransform(tf_fw_cmd);
 
-    if (ee_cmd_valid_) {
-      geometry_msgs::msg::TransformStamped tf_ee_cmd;
-      tf_ee_cmd.header.stamp = stamp;
-      tf_ee_cmd.header.frame_id = "world";
-      tf_ee_cmd.child_frame_id = "end_effector_cmd";
-      tf_ee_cmd.transform.translation.x = ee_cmd_pos_[0];
-      tf_ee_cmd.transform.translation.y = ee_cmd_pos_[1];
-      tf_ee_cmd.transform.translation.z = ee_cmd_pos_[2];
-
-      tf2::Quaternion q_ee_cmd;
-      q_ee_cmd.setRPY(0.0, 0.0, ee_cmd_yaw_deg_ * kDegToRad);
-      tf_ee_cmd.transform.rotation.x = q_ee_cmd.x();
-      tf_ee_cmd.transform.rotation.y = q_ee_cmd.y();
-      tf_ee_cmd.transform.rotation.z = q_ee_cmd.z();
-      tf_ee_cmd.transform.rotation.w = q_ee_cmd.w();
-      tf_broadcaster_->sendTransform(tf_ee_cmd);
-    }
-
     geometry_msgs::msg::Point p0;
     p0.x = pos_[0];
     p0.y = pos_[1];
@@ -304,15 +297,24 @@ private:
     normal_est_display.z() *= 1.3;
 
     publishArrow(raw_force_pub_, stamp, "world", "mob_force_pure", 0, p0, mob_force_pure_, 10.0, 0.02, 0.04, 0.06, 1.0f, 0.2f, 0.2f);
-    publishArrow(scaled_force_pub_, stamp, "world", "mob_force_residual", 0, p0, mob_force_residual_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
+    publishArrow(scaled_force_pub_, stamp, "world", "mob_force_residual", 0, p_ee, -mob_force_residual_, 10.0, 0.02, 0.04, 0.06, 0.7f, 0.0f, 0.8f);
     publishArrow(normal_est_pub_, stamp, "world", "normal_estimation", 0, p0, normal_est_display, 0.35, 0.02, 0.04, 0.06, 0.1f, 0.8f, 0.2f);
     publishArrow(acc_pub_, stamp, "world", "acceleration", 0, p0, world_acc_, 0.5, 0.015, 0.03, 0.05, 0.0f, 0.0f, 1.0f);
     publishArrow(vel_pub_, stamp, "world", "velocity", 0, p0, world_vel_, 1.0, 0.015, 0.03, 0.05, 1.0f, 0.8f, 0.0f);
-    publishArrow(ee_vel_pub_, stamp, "world", "ee_velocity", 0, p_ee, ee_vel_used_, 1.0, 0.015, 0.03, 0.05, 0.0f, 0.9f, 0.9f);
+    publishArrow(ee_vel_pub_, stamp, "world", "ee_velocity", 0, p_ee, ee_vel_used_, 2.0, 0.015, 0.03, 0.05, 0.0f, 0.9f, 0.9f);
     pushSmoothTrajectorySample(ee_pos, stamp);
     const auto new_history_sample = pushFrameHistorySample(ee_pos, normal_frame_quat, stamp);
     publishFrameHistoryDelta(stamp, expired_history_ids, new_history_sample);
     maybePublishTrajectoryHistory(stamp);
+  }
+
+  bool isFinitePose(const geometry_msgs::msg::Pose & pose) const
+  {
+    const auto & p = pose.position;
+    const auto & q = pose.orientation;
+    return
+      std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) &&
+      std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w);
   }
 
   std::array<double, 3> declareOffsetParameter()
@@ -786,26 +788,152 @@ private:
 
   void publishWall(const rclcpp::Time& stamp)
   {
+    const bool use_tf_frame = !wall_marker_frame_.empty();
+    if (!use_tf_frame && !wall_pose_valid_) {
+      return;
+    }
+
     visualization_msgs::msg::Marker marker;
     marker.header.stamp = stamp;
-    marker.header.frame_id = "world";
+    marker.header.frame_id = use_tf_frame ? wall_marker_frame_ : "world";
     marker.ns = "wall";
     marker.id = 0;
     marker.type = visualization_msgs::msg::Marker::CUBE;
     marker.action = visualization_msgs::msg::Marker::ADD;
-    marker.pose.position.x = 1.0;
-    marker.pose.position.y = 0.0;
-    marker.pose.position.z = 0.8;
     marker.pose.orientation.w = 1.0;
-    marker.scale.x = 0.01;
-    marker.scale.y = 1.0;
-    marker.scale.z = 0.6;
-    marker.color.r = 0.3f;
-    marker.color.g = 0.3f;
+    if (!use_tf_frame) {
+      marker.pose = wall_pose_;
+    }
+    marker.pose.orientation = normalizedQuaternion(marker.pose.orientation);
+    marker.frame_locked = use_tf_frame;
+    marker.scale.x = wall_scale_x_;
+    marker.scale.y = wall_scale_y_;
+    marker.scale.z = wall_scale_z_;
+    marker.color.r = 0.0f;
+    marker.color.g = 0.25f;
     marker.color.b = 1.0f;
-    marker.color.a = 0.3f;
+    marker.color.a = 1.0f;
     marker.lifetime = rclcpp::Duration(0, 0);
     wall_pub_->publish(marker);
+
+    visualization_msgs::msg::Marker outline;
+    outline.header = marker.header;
+    outline.ns = "wall_outline";
+    outline.id = 0;
+    outline.type = visualization_msgs::msg::Marker::LINE_LIST;
+    outline.action = visualization_msgs::msg::Marker::ADD;
+    outline.pose = marker.pose;
+    outline.frame_locked = marker.frame_locked;
+    outline.scale.x = 0.012;
+    outline.color.r = 0.02f;
+    outline.color.g = 0.02f;
+    outline.color.b = 0.02f;
+    outline.color.a = 1.0f;
+    outline.lifetime = rclcpp::Duration(0, 0);
+    outline.points = makeWallBoxEdges(wall_scale_x_, wall_scale_y_, wall_scale_z_);
+    wall_pub_->publish(outline);
+
+    visualization_msgs::msg::Marker normal;
+    normal.header = marker.header;
+    normal.ns = "wall_normal";
+    normal.id = 0;
+    normal.type = visualization_msgs::msg::Marker::ARROW;
+    normal.action = visualization_msgs::msg::Marker::ADD;
+    normal.pose = marker.pose;
+    normal.frame_locked = marker.frame_locked;
+    normal.scale.x = 0.025;
+    normal.scale.y = 0.055;
+    normal.scale.z = 0.075;
+    normal.color.r = 1.0f;
+    normal.color.g = 0.20f;
+    normal.color.b = 0.08f;
+    normal.color.a = 1.0f;
+    normal.lifetime = rclcpp::Duration(0, 0);
+    geometry_msgs::msg::Point normal_start;
+    geometry_msgs::msg::Point normal_end;
+    normal_start.x = wall_scale_x_ * 0.5;
+    normal_end.x = wall_scale_x_ * 0.5 + 0.25;
+    normal.points = {normal_start, normal_end};
+    wall_pub_->publish(normal);
+
+    visualization_msgs::msg::Marker center;
+    center.header = marker.header;
+    center.ns = "wall_center";
+    center.id = 0;
+    center.type = visualization_msgs::msg::Marker::SPHERE;
+    center.action = visualization_msgs::msg::Marker::ADD;
+    center.pose = marker.pose;
+    center.frame_locked = marker.frame_locked;
+    center.scale.x = 0.045;
+    center.scale.y = 0.045;
+    center.scale.z = 0.045;
+    center.color.r = 1.0f;
+    center.color.g = 1.0f;
+    center.color.b = 1.0f;
+    center.color.a = 1.0f;
+    center.lifetime = rclcpp::Duration(0, 0);
+    wall_pub_->publish(center);
+  }
+
+  std::vector<geometry_msgs::msg::Point> makeWallBoxEdges(double sx, double sy, double sz) const
+  {
+    const double hx = 0.5 * sx;
+    const double hy = 0.5 * sy;
+    const double hz = 0.5 * sz;
+
+    std::array<geometry_msgs::msg::Point, 8> c;
+    int idx = 0;
+    for (const double x : {-hx, hx}) {
+      for (const double y : {-hy, hy}) {
+        for (const double z : {-hz, hz}) {
+          c[idx].x = x;
+          c[idx].y = y;
+          c[idx].z = z;
+          ++idx;
+        }
+      }
+    }
+
+    auto add_edge = [&c](std::vector<geometry_msgs::msg::Point> & out, int a, int b) {
+      out.push_back(c[a]);
+      out.push_back(c[b]);
+    };
+
+    std::vector<geometry_msgs::msg::Point> points;
+    points.reserve(24);
+    add_edge(points, 0, 1);
+    add_edge(points, 0, 2);
+    add_edge(points, 0, 4);
+    add_edge(points, 1, 3);
+    add_edge(points, 1, 5);
+    add_edge(points, 2, 3);
+    add_edge(points, 2, 6);
+    add_edge(points, 3, 7);
+    add_edge(points, 4, 5);
+    add_edge(points, 4, 6);
+    add_edge(points, 5, 7);
+    add_edge(points, 6, 7);
+    return points;
+  }
+
+  geometry_msgs::msg::Quaternion normalizedQuaternion(
+    const geometry_msgs::msg::Quaternion & q_in) const
+  {
+    geometry_msgs::msg::Quaternion q = q_in;
+    const double n = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
+    if (n < 1.0e-9 || !std::isfinite(n)) {
+      q.x = 0.0;
+      q.y = 0.0;
+      q.z = 0.0;
+      q.w = 1.0;
+      return q;
+    }
+
+    q.x /= n;
+    q.y /= n;
+    q.z /= n;
+    q.w /= n;
+    return q;
   }
 
   struct TrajectorySample
@@ -815,8 +943,7 @@ private:
   };
 
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr sub_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr ee_velocity_sub_;
-  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr ee_cmd_sub_;
+  rclcpp::Subscription<motion_capture_tracking_interfaces::msg::NamedPoseArray>::SharedPtr wall_pose_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_history_srv_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
@@ -844,17 +971,19 @@ private:
   Eigen::Vector3d world_vel_;
   Eigen::Vector3d world_acc_;
   Eigen::Vector3d ee_vel_used_;
-  Eigen::Vector3d ee_cmd_pos_;
   std::array<double, 3> ee_offset_;
   std::string data_topic_;
-  std::string ee_velocity_topic_;
-  std::string ee_cmd_topic_;
-  double ee_cmd_yaw_deg_{0.0};
-  bool ee_cmd_valid_{false};
+  std::string wall_pose_topic_;
+  std::string wall_pose_name_;
+  std::string wall_marker_frame_;
+  geometry_msgs::msg::Pose wall_pose_;
   double history_sample_period_{0.2};
   double history_publish_period_{0.10};
   double history_duration_{30.0};
   double history_frame_axis_scale_{0.3};
+  double wall_scale_x_{0.01};
+  double wall_scale_y_{1.0};
+  double wall_scale_z_{0.6};
   int next_history_sample_id_{0};
   size_t last_ee_history_sub_count_{0};
   size_t last_contact_history_sub_count_{0};
@@ -863,6 +992,7 @@ private:
   std::deque<TrajectorySample> smooth_trajectory_history_;
   std::deque<HistorySample> frame_history_;
   bool pose_valid_{false};
+  bool wall_pose_valid_{false};
 };
 
 int main(int argc, char* argv[])

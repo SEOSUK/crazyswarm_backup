@@ -73,6 +73,7 @@ public:
       "csv_path", ""));
     start_offset_sec_ = declare_parameter<double>("start_offset_sec", 0.0);
     playback_rate_ = declare_parameter<double>("playback_rate", 1.0);
+    paused_.store(declare_parameter<bool>("paused", false));
     sample_hz_ = std::max(1e-6, declare_parameter<double>("sample_hz", 50.0));
     publish_topic_ = declare_parameter<std::string>("publish_topic", "/data_logging_msg");
     declare_parameter<double>("seek_time_sec", 0.0);
@@ -364,6 +365,14 @@ private:
     while (rclcpp::ok() && !stopRequested_) {
       applyPendingControl();
 
+      if (paused_.load()) {
+        std::unique_lock<std::mutex> lock(controlMutex_);
+        controlCv_.wait_for(lock, std::chrono::milliseconds(20), [this]() {
+          return stopRequested_ || reloadRequested_ || seekRequested_ || !paused_.load();
+        });
+        continue;
+      }
+
       Row row;
       bool hasRow = false;
       bool finishedPlayback = false;
@@ -400,7 +409,7 @@ private:
 
       std::unique_lock<std::mutex> lock(controlMutex_);
       controlCv_.wait_for(lock, std::chrono::milliseconds(5), [this]() {
-        return stopRequested_ || reloadRequested_ || seekRequested_;
+        return stopRequested_ || reloadRequested_ || seekRequested_ || paused_.load();
       });
     }
   }
@@ -430,6 +439,8 @@ private:
           return result;
         }
         playback_rate_.store(nextRate);
+      } else if (parameter.get_name() == "paused") {
+        setPaused(parameter.as_bool());
       } else if (parameter.get_name() == "sample_hz") {
         const double nextSampleHz = parameter.as_double();
         if (nextSampleHz <= 0.0) {
@@ -463,6 +474,20 @@ private:
       pendingCsvPath_ = csv_path;
       pendingStartOffsetSec_ = start_offset_sec;
       reloadRequested_ = true;
+    }
+    controlCv_.notify_all();
+  }
+
+  void setPaused(bool paused)
+  {
+    {
+      std::lock_guard<std::mutex> lock(stateMutex_);
+      paused_.store(paused);
+      if (!paused) {
+        anchorRowTimeSec_ = currentTimeSec_;
+        anchorWallTime_ = std::chrono::steady_clock::now();
+      }
+      publishStatusLocked();
     }
     controlCv_.notify_all();
   }
@@ -557,6 +582,7 @@ private:
       playback_rate_.load(),
       static_cast<double>(rows_.size()),
       static_cast<double>(currentIndex_),
+      paused_.load() ? 1.0 : 0.0,
     };
     status_pub_->publish(status);
   }
@@ -569,6 +595,7 @@ private:
   std::condition_variable controlCv_;
   std::atomic<double> playback_rate_{1.0};
   std::atomic<double> totalDurationSec_{0.0};
+  std::atomic<bool> paused_{false};
   bool reloadRequested_{false};
   bool seekRequested_{false};
   std::string pendingCsvPath_;

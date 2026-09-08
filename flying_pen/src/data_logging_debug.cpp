@@ -10,6 +10,7 @@
 #include <crazyflie_interfaces/msg/position.hpp>
 #include <crazyflie_interfaces/msg/position_control.hpp>
 #include <crazyflie_interfaces/msg/status.hpp>
+#include <motion_capture_tracking_interfaces/msg/named_pose_array.hpp>
 
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -105,11 +106,16 @@ public:
   // 73..75 : normal_postproj xyz [-], velocity-projected normal candidate
   // 76..78 : normal_estimation xyz [-], estimated world normal vector
   // 79..81 : ee_vel_used xyz [m/s], 1 Hz LPF contact/end-effector velocity used in normal estimation
-  // 82     : normal_velocity_leakage [m/s], 1 Hz LPF |n_hat^T v_EE|
-  // 83     : yaw_ref_deg [deg], final yaw reference used by firmware/controller
+  // 82     : omega_n [1/s], 1 Hz LPF norm of d/dt(normal_est)
+  // 83     : normal_velocity_leakage [m/s], 1 Hz LPF |n_hat^T v_EE|
   // 84     : stabilizer loop elapsed time [us]
   // 85     : stabilizer loop elapsed time max since boot [us]
-  static constexpr int kDataLen = 86;
+  // 86     : alpha_frame [-], tangential command gating factor
+  // 87     : t1_cmd_des [m/s], gated desired tangential command in t1
+  // 88     : t2_cmd_des [m/s], gated desired tangential command in t2
+  // 89..91 : tilted_wall position xyz [m], world frame
+  // 92..95 : tilted_wall orientation xyzw [-], world frame
+  static constexpr int kDataLen = 96;
 
   DataLoggingDebugNode()
   : Node("data_logging_debug")
@@ -132,8 +138,14 @@ public:
 
     data_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(publish_topic_, 10);
 
+    auto sensor_qos = rclcpp::QoS(
+      rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 10),
+      rmw_qos_profile_sensor_data);
+
     sub_pose_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
       cf_ns_ + "/pose", 10, std::bind(&DataLoggingDebugNode::poseCallback, this, _1));
+    sub_named_poses_ = this->create_subscription<motion_capture_tracking_interfaces::msg::NamedPoseArray>(
+      "/poses", sensor_qos, std::bind(&DataLoggingDebugNode::namedPosesCallback, this, _1));
     sub_cmd_position_ = this->create_subscription<crazyflie_interfaces::msg::Position>(
       cf_ns_ + "/cmd_position", 10, std::bind(&DataLoggingDebugNode::cmdPositionCallback, this, _1));
     sub_cmd_position_control_ = this->create_subscription<crazyflie_interfaces::msg::PositionControl>(
@@ -162,6 +174,8 @@ public:
       cf_ns_ + "/cf_su_normal_metrics", 10, std::bind(&DataLoggingDebugNode::normalMetricsCallback, this, _1));
     sub_stabilizer_timing_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_stabilizer_timing", 10, std::bind(&DataLoggingDebugNode::stabilizerTimingCallback, this, _1));
+    sub_alpha_frame_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
+      cf_ns_ + "/cf_su_alpha_frame", 10, std::bind(&DataLoggingDebugNode::alphaFrameCallback, this, _1));
     sub_imu_raw_pair_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
       cf_ns_ + "/cf_imu_raw_pair", 10, std::bind(&DataLoggingDebugNode::imuRawPairCallback, this, _1));
     sub_vel_att_des_ = this->create_subscription<crazyflie_interfaces::msg::LogDataGeneric>(
@@ -223,10 +237,15 @@ public:
     push3(out, normal_postproj_);
     push3(out, normal_est_);
     push3(out, ee_vel_used_);
+    out.data.push_back(omega_n_);
     out.data.push_back(normal_velocity_leakage_);
-    out.data.push_back(yaw_ref_deg_);
     out.data.push_back(stabilizer_loop_dt_us_);
     out.data.push_back(stabilizer_loop_dt_us_max_);
+    out.data.push_back(alpha_frame_);
+    out.data.push_back(t1_cmd_des_);
+    out.data.push_back(t2_cmd_des_);
+    push3(out, wall_xyz_);
+    push4(out, wall_quat_xyzw_);
 
     if (out.data.size() != static_cast<size_t>(kDataLen)) {
       out.data.resize(kDataLen, qnan_debug());
@@ -301,9 +320,11 @@ private:
       << "normalPost_x,normalPost_y,normalPost_z,"
       << "normalEst_x,normalEst_y,normalEst_z,"
       << "eeVelUsed_x,eeVelUsed_y,eeVelUsed_z,"
-      << "normalVelocityLeakage,"
-      << "yawRef_deg,"
-      << "loopDtUs,loopDtUsMax\n";
+      << "omega_n,normalVelocityLeakage,"
+      << "loopDtUs,loopDtUsMax,"
+      << "alphaFrame,t1CmdDes,t2CmdDes,"
+      << "wall_x,wall_y,wall_z,"
+      << "wall_qx,wall_qy,wall_qz,wall_qw\n";
     csv_.flush();
   }
 
@@ -343,6 +364,34 @@ private:
     pose_rpy_[0] = roll;
     pose_rpy_[1] = pitch;
     pose_rpy_[2] = yaw;
+  }
+
+  void namedPosesCallback(
+    const motion_capture_tracking_interfaces::msg::NamedPoseArray::SharedPtr msg)
+  {
+    for (const auto & named_pose : msg->poses) {
+      if (named_pose.name != "tilted_wall") {
+        continue;
+      }
+
+      const auto & p = named_pose.pose.position;
+      const auto & q = named_pose.pose.orientation;
+      if (
+        !std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
+        !std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z) || !std::isfinite(q.w))
+      {
+        return;
+      }
+
+      wall_xyz_[0] = named_pose.pose.position.x;
+      wall_xyz_[1] = named_pose.pose.position.y;
+      wall_xyz_[2] = named_pose.pose.position.z;
+      wall_quat_xyzw_[0] = named_pose.pose.orientation.x;
+      wall_quat_xyzw_[1] = named_pose.pose.orientation.y;
+      wall_quat_xyzw_[2] = named_pose.pose.orientation.z;
+      wall_quat_xyzw_[3] = named_pose.pose.orientation.w;
+      return;
+    }
   }
 
   void motorThrustCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg) { copy4(msg, motor_thrust_); }
@@ -385,11 +434,12 @@ private:
   }
   void normalMetricsCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
   {
-    if (msg->values.size() >= 4) {
+    if (msg->values.size() >= 5) {
       ee_vel_used_[0] = msg->values[0];
       ee_vel_used_[1] = msg->values[1];
       ee_vel_used_[2] = msg->values[2];
-      normal_velocity_leakage_ = msg->values[3];
+      omega_n_ = msg->values[3];
+      normal_velocity_leakage_ = msg->values[4];
     }
   }
   void stabilizerTimingCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
@@ -397,6 +447,14 @@ private:
     if (msg->values.size() >= 2) {
       stabilizer_loop_dt_us_ = msg->values[0];
       stabilizer_loop_dt_us_max_ = msg->values[1];
+    }
+  }
+  void alphaFrameCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
+  {
+    if (msg->values.size() >= 3) {
+      alpha_frame_ = msg->values[0];
+      t1_cmd_des_ = msg->values[1];
+      t2_cmd_des_ = msg->values[2];
     }
   }
   void imuRawPairCallback(const crazyflie_interfaces::msg::LogDataGeneric::SharedPtr msg)
@@ -419,10 +477,6 @@ private:
       att_des_[0] = msg->values[3];
       att_des_[1] = msg->values[4];
       att_des_[2] = msg->values[5];
-      yaw_ref_deg_ = msg->values[5];
-    }
-    if (msg->values.size() >= 7) {
-      yaw_ref_deg_ = msg->values[6];
     }
   }
   void cmdPositionCallback(const crazyflie_interfaces::msg::Position::SharedPtr msg)
@@ -538,6 +592,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr data_pub_;
 
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_pose_;
+  rclcpp::Subscription<motion_capture_tracking_interfaces::msg::NamedPoseArray>::SharedPtr sub_named_poses_;
   rclcpp::Subscription<crazyflie_interfaces::msg::Position>::SharedPtr sub_cmd_position_;
   rclcpp::Subscription<crazyflie_interfaces::msg::PositionControl>::SharedPtr sub_cmd_position_control_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_ctrl_misc_;
@@ -552,6 +607,7 @@ private:
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_normal_debug_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_normal_metrics_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_stabilizer_timing_;
+  rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_alpha_frame_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_imu_raw_pair_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_vel_att_des_;
   rclcpp::Subscription<crazyflie_interfaces::msg::LogDataGeneric>::SharedPtr sub_debug_;
@@ -596,11 +652,17 @@ private:
   std::array<double, 3> normal_postproj_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> normal_est_ = {qnan_debug(), qnan_debug(), qnan_debug()};
   std::array<double, 3> ee_vel_used_ = {qnan_debug(), qnan_debug(), qnan_debug()};
+  double omega_n_ = qnan_debug();
   double normal_velocity_leakage_ = qnan_debug();
-  double yaw_ref_deg_ = qnan_debug();
   double stabilizer_loop_dt_us_ = qnan_debug();
   double stabilizer_loop_dt_us_max_ = qnan_debug();
+  double alpha_frame_ = qnan_debug();
+  double t1_cmd_des_ = qnan_debug();
+  double t2_cmd_des_ = qnan_debug();
   double force_desired_ = qnan_debug();
+  std::array<double, 3> wall_xyz_ = {qnan_debug(), qnan_debug(), qnan_debug()};
+  std::array<double, 4> wall_quat_xyzw_ = {
+    qnan_debug(), qnan_debug(), qnan_debug(), qnan_debug()};
 };
 
 int main(int argc, char * argv[])
